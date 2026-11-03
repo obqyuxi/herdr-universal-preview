@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: herdr-universal-preview <hup@localhost>
+Date: Mon, 2 Nov 2026 22:04:01 -0800
+Subject: [PATCH 3/4] gpui: GPUIApplication implements CrAppControlProtocol for
+ Chromium (CEF)
+
+CEF requires NSApp to answer isHandlingSendEvent / setHandlingSendEvent:,
+with sendEvent: marking dispatch. Needed for the herdr-universal-preview
+Chromium browser panel; harmless otherwise.
+
+diff --git a/vendor/gpui-pre-macos/src/platform.rs b/vendor/gpui-pre-macos/src/platform.rs
+index d25e86e..ff0671a 100644
+--- a/vendor/gpui-pre-macos/src/platform.rs
++++ b/vendor/gpui-pre-macos/src/platform.rs
+@@ -78,12 +78,45 @@ const MAC_PLATFORM_IVAR: &str = "platform";
+ static mut APP_CLASS: *const Class = ptr::null();
+ static mut APP_DELEGATE_CLASS: *const Class = ptr::null();
+ 
++// HUP: CrAppControlProtocol state for CEF (one application per process).
++static HUP_HANDLING_SEND_EVENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++extern "C" fn hup_is_handling_send_event(_this: &Object, _sel: Sel) -> BOOL {
++    if HUP_HANDLING_SEND_EVENT.load(std::sync::atomic::Ordering::Relaxed) { YES } else { NO }
++}
++
++extern "C" fn hup_set_handling_send_event(_this: &mut Object, _sel: Sel, handling: BOOL) {
++    HUP_HANDLING_SEND_EVENT.store(handling != NO, std::sync::atomic::Ordering::Relaxed);
++}
++
++extern "C" fn hup_send_event(this: &mut Object, _sel: Sel, event: id) {
++    let was = HUP_HANDLING_SEND_EVENT.swap(true, std::sync::atomic::Ordering::Relaxed);
++    unsafe {
++        let _: () = msg_send![super(this, class!(NSApplication)), sendEvent: event];
++    }
++    HUP_HANDLING_SEND_EVENT.store(was, std::sync::atomic::Ordering::Relaxed);
++}
++
+ #[ctor(unsafe)]
+ unsafe fn build_classes() {
+     unsafe {
+         APP_CLASS = {
+             let mut decl = ClassDecl::new("GPUIApplication", class!(NSApplication)).unwrap();
+             decl.add_ivar::<*mut c_void>(MAC_PLATFORM_IVAR);
++            // HUP: Chromium (CEF) requires the application to implement
++            // CrAppControlProtocol: it asks whether an event is being dispatched.
++            decl.add_method(
++                sel!(isHandlingSendEvent),
++                hup_is_handling_send_event as extern "C" fn(&Object, Sel) -> BOOL,
++            );
++            decl.add_method(
++                sel!(setHandlingSendEvent:),
++                hup_set_handling_send_event as extern "C" fn(&mut Object, Sel, BOOL),
++            );
++            decl.add_method(
++                sel!(sendEvent:),
++                hup_send_event as extern "C" fn(&mut Object, Sel, id),
++            );
+             decl.register()
+         }
+     };

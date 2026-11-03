@@ -61,6 +61,7 @@ hup_isolate() {
   export HERDR_CORE_DIRS=$HUP_BIN            # app looks for its core only here
   export HC_INSTALL_DIR=$HUP_BIN             # a core install, if ever triggered, lands here
   export HERDR_APP_NO_SOUND=1
+  export HUP_CHROMIUM_PROFILE=$HUP_LOCAL/chromium-profile   # never the person's Chrome profile
   export HERDR_TELEMETRY=0                   # source builds never send; also keep it off locally
   mkdir -p "$HUP_LOCAL/state" "$HUP_LOCAL/config" "$HUP_APP_HOME" "$HUP_LOGS" "$HUP_RUN"
 }
@@ -70,7 +71,8 @@ hup_toolchain() {
   export RUSTUP_HOME=$HUP_TOOLCHAIN/rustup
   export CARGO_HOME=$HUP_TOOLCHAIN/cargo
   export ZIG=$HUP_TOOLCHAIN/zig/zig
-  export PATH=$CARGO_HOME/bin:$HUP_TOOLCHAIN/zig:$PATH
+  export CEF_PATH=$HUP_LOCAL/cef                # CEF 156 binaries (export-cef-dir)
+  export PATH=$CARGO_HOME/bin:$HUP_TOOLCHAIN/zig:$HUP_LOCAL/py/bin:$PATH
 }
 
 # Run the test hc (never the PATH one) with the isolated env.

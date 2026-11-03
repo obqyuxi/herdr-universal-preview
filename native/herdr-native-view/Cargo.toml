@@ -6,6 +6,15 @@ license = "Apache-2.0"
 publish = false
 description = "Native macOS content views (web, PDF, media, Quick Look) hosted inside Herdr's window; interface native-view/0"
 
+[features]
+# Chromium (CEF 156) browser views. Needs CEF_PATH (scripts/lib/env.sh) to build.
+chromium = ["dep:cef"]
+
+[[bin]]
+name = "herdr-cef-helper"
+path = "src/bin/herdr_cef_helper.rs"
+required-features = ["chromium"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -21,3 +30,4 @@ objc2-av-kit = "0.3.2"
 objc2-av-foundation = { version = "0.3.2", features = ["objc2-core-media"] }
 objc2-core-media = "0.3.2"
 objc2-quick-look-ui = "0.3.2"
+cef = { version = "=156.3.0", optional = true }

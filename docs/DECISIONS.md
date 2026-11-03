@@ -73,3 +73,17 @@
 
 - 加一个本地事件监视器（只监视 mouseDown）：点击落在所有原生视图之外，而当前 first responder 在某个原生视图内时，把 first responder 交还 GPUIView。
 - mod 也可以调用 `blur` 主动交还焦点。
+
+## D10 侧边浏览器改用 Chromium 内核（用户决定，2026-11-02）
+
+- **决定**：用户在了解代价（应用体积增加数百 MB、需要长期跟进安全补丁、开发量按天计）后，选择"直接换 Chrome 内核"。需要的功能：查找/缩放/打印、下载/历史、清除浏览数据、导入 Chrome 登录、扩展程序。
+- **路线**：CEF 156，与本机 Chrome 156.0.8078.80 同一代；Rust 绑定使用 tauri-apps/cef-rs `156.3.0+156.0.15`（`224a785c`），二进制导出到 `.local/cef`。
+- **集成要点（待逐项实测）**：
+  1. GPUI 的 `GPUIApplication` 需要实现 `CrAppControlProtocol`（`isHandlingSendEvent` / `setHandlingSendEvent:`），给 vendored gpui-pre-macos 打补丁。
+  2. 使用 external message pump：`on_schedule_message_pump_work` 加后备定时器调用 `do_message_loop_work`，不接管 GPUI 的 run loop。
+  3. 浏览器视图以 `SetAsChild` 挂到窗口内容视图，复用现有的帧同步、遮挡和焦点逻辑（新增 kind `chromium`）。
+  4. 打包：`Contents/Frameworks/Chromium Embedded Framework.framework`，以及 Helper、GPU、Renderer、Plugin、Alerts 五个 helper app。
+  5. 资料目录：开发版使用项目内 `.local/chromium-profile`，不使用、也不复制日常 Chrome 的资料目录。
+- **用户隐私**：导入 Chrome 登录要读取用户 Chrome 的 Cookie/密码，并经过钥匙串授权。真正执行前要再次单独确认。
+- **已知不确定**：CEF 对 Chrome 扩展支持有限；Chrome style 浏览器在 macOS 上能否挂到原生父视图，需要实测。
+- **WebKit 版保留**：作为原版 Herdr 不可用时的后备，以及 Chromium 失败时的回退。

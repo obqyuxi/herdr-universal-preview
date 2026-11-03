@@ -7,6 +7,8 @@ import * as herdr from "herdr";
 
 const ID = "browser";
 const hasNative = () => typeof herdr.nativeView?.new === "function";
+// Chromium when the host has it (Herdr Preview Dev with CEF), else WebKit.
+const engine = () => (herdr.nativeViewCapabilities?.().kinds ?? []).some(k => k.kind === "chromium") ? "chromium" : "web";
 
 export default class Browser extends View {
   init(_props, cx) {
@@ -22,6 +24,7 @@ export default class Browser extends View {
     this.input = InputState.new({ placeholder: "输入网址，回车打开（例如 github.com 或 localhost:3000）", value: this.start ?? "" });
     this.input.on("submit", (_e, cx) => this.go(this.input.value(), cx));
     if (!hasNative()) return;
+    this.engine = engine();
     cx.spawn(async (cx) => {
       for (;;) {
         const e = JSON.parse(await herdr.nextNativeViewEvent());
@@ -83,6 +86,6 @@ export default class Browser extends View {
       .when(Boolean(status), el => el.child(status))
       .child(div().flex_1().min_h(0).relative()
         .when(!this.start, el => el.child(div().p(16).text_color(t.dim).text_size(13).child("在上面输入网址，回车打开")))
-        .when(Boolean(this.start), el => el.child(herdr.nativeView.new(ID, { kind: "web", url: this.start, persist: true }))));
+        .when(Boolean(this.start), el => el.child(herdr.nativeView.new(ID, { kind: this.engine, url: this.start, persist: true }))));
   }
 }

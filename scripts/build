@@ -53,8 +53,12 @@ echo "built in $((SECONDS - start))s: $HUP_UPSTREAM/target/$profile/herdr-app"
 version=$(cd "$HUP_UPSTREAM" && sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 rev=$(git -C "$HUP_UPSTREAM" rev-parse --short HEAD)
 app=$HUP_DEV_APP
-rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+# Keep the (large) Chromium framework between builds; rebuild everything else.
+if [[ -d $app ]]; then
+  find "$app/Contents" -mindepth 1 -maxdepth 1 ! -name Frameworks -exec rm -rf {} +
+  find "$app/Contents/Frameworks" -mindepth 1 -maxdepth 1 -name '*Helper*.app' -exec rm -rf {} + 2>/dev/null || true
+fi
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
 cp "$HUP_UPSTREAM/target/$profile/herdr-app" "$HUP_DEV_EXE"
 cp "$HUP_UPSTREAM/assets/icons/Herdr.icns" "$app/Contents/Resources/HerdrPreviewDev.icns"
 cp "$HUP_UPSTREAM/LICENSE" "$HUP_UPSTREAM/THIRD-PARTY-NOTICES" "$app/Contents/Resources/"
@@ -82,10 +86,42 @@ cat >"$app/Contents/Info.plist" <<PLIST
         <key>HC_INSTALL_DIR</key><string>$HUP_BIN</string>
         <key>HERDR_APP_NO_SOUND</key><string>1</string>
         <key>HERDR_TELEMETRY</key><string>0</string>
+        <key>HUP_CHROMIUM_PROFILE</key><string>$HUP_LOCAL/chromium-profile</string>
     </dict>
 </dict></plist>
 PLIST
 plutil -lint "$app/Contents/Info.plist" >/dev/null
-codesign --force --sign - "$app" 2>/dev/null
-codesign --verify "$app"
-echo "bundle: $app ($version-hup.$rev, dev.herdr.app.preview-dev, ad-hoc signed)"
+
+# Chromium: the CEF framework and five helper apps (GPU, renderer, plugin, alerts, utility).
+[[ -d "$CEF_PATH/Chromium Embedded Framework.framework" ]] || hup_die "no CEF at $CEF_PATH (run .work/cef-rs export-cef-dir, see docs/DECISIONS.md D10)"
+rsync -a --delete "$CEF_PATH/Chromium Embedded Framework.framework" "$app/Contents/Frameworks/"
+cp "$CEF_PATH/CREDITS.html" "$app/Contents/Resources/CEF-CREDITS.html"
+hlog=$HUP_LOGS/build-cef-helper.log
+hargs=(build --manifest-path "$HUP_ROOT/native/herdr-native-view/Cargo.toml" --features chromium --bin herdr-cef-helper)
+[[ $profile == release ]] && hargs+=(--release)
+CARGO_TARGET_DIR=$HUP_LOCAL/target-native cargo "${hargs[@]}" >"$hlog" 2>&1 || { tail -30 "$hlog" >&2; hup_die "helper build failed"; }
+helper_bin=$HUP_LOCAL/target-native/$profile/herdr-cef-helper
+for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
+  name="HerdrPreviewDev Helper$suffix"
+  h="$app/Contents/Frameworks/$name.app"
+  mkdir -p "$h/Contents/MacOS"
+  cp "$helper_bin" "$h/Contents/MacOS/$name"
+  id_suffix=$(printf '%s' "$suffix" | tr -d ' ()' | tr '[:upper:]' '[:lower:]')
+  cat >"$h/Contents/Info.plist" <<HPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleExecutable</key><string>$name</string>
+    <key>CFBundleIdentifier</key><string>dev.herdr.app.preview-dev.helper${id_suffix:+.$id_suffix}</string>
+    <key>CFBundleName</key><string>$name</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>LSUIElement</key><string>1</string>
+    <key>LSEnvironment</key><dict><key>MallocNanoZone</key><string>0</string></dict>
+    <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+</dict></plist>
+HPLIST
+done
+codesign --force --deep --sign - "$app" 2>/dev/null
+codesign --verify --deep "$app"
+echo "bundle: $app ($version-hup.$rev, dev.herdr.app.preview-dev, ad-hoc signed, $(du -sh "$app" | cut -f1) with Chromium)"

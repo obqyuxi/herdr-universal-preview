@@ -44,6 +44,12 @@ pub fn set_event_sink(sink: impl Fn(Event) + 'static) {
     SINK.with(|s| *s.borrow_mut() = Some(Box::new(sink)));
 }
 
+/// For renderers outside this file (chromium.rs).
+#[allow(dead_code)]
+pub(crate) fn emit_event(key: &str, generation: u64, name: &'static str, data: Value) {
+    emit(key, generation, name, data)
+}
+
 fn emit(key: &str, generation: u64, name: &'static str, data: Value) {
     let ev = Event {
         key: key.to_owned(),
@@ -67,6 +73,8 @@ fn emit(key: &str, generation: u64, name: &'static str, data: Value) {
 }
 
 enum Renderer {
+    #[cfg(feature = "chromium")]
+    Chromium(crate::chromium::ChromiumView),
     Web {
         view: Retained<WKWebView>,
         delegate: Retained<WebDelegate>,
@@ -147,7 +155,7 @@ pub fn ensure(key: &str, gpui_view: *mut c_void, props: &Value) -> Result<u64, S
     let container = unsafe { gpui.superview() }.ok_or("GPUI view is not in a window")?;
     let generation = 1;
     let zero = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
-    let (view, renderer) = make(mtm, key, &spec, zero, generation)?;
+    let (view, renderer) = make(mtm, key, &spec, zero, generation, &container)?;
     view.setHidden(true);
     container.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Above, Some(&gpui));
     install_focus_monitor(mtm);
@@ -186,7 +194,21 @@ fn make(
     spec: &Spec,
     frame: NSRect,
     generation: u64,
+    container: &NSView,
 ) -> Result<(Retained<NSView>, Renderer), String> {
+    let _ = container;
+    if spec.kind == Kind::Chromium {
+        #[cfg(feature = "chromium")]
+        {
+            let Source::Url(url) = &spec.source else {
+                return Err("Chromium views take a `url`".into());
+            };
+            let (view, c) = crate::chromium::create(mtm, key, container, url, generation)?;
+            return Ok((view, Renderer::Chromium(c)));
+        }
+        #[cfg(not(feature = "chromium"))]
+        return Err("this build has no Chromium".into());
+    }
     unsafe {
         match spec.kind {
             Kind::Web => {
@@ -267,6 +289,7 @@ fn make(
                     Renderer::Media { view, player: None },
                 ))
             }
+            Kind::Chromium => Err("unreachable: Chromium handled above".into()),
             Kind::QuickLook => {
                 let view = QLPreviewView::initWithFrame_style(
                     QLPreviewView::alloc(mtm),
@@ -298,6 +321,11 @@ fn load(
 ) -> Result<Option<Retained<AVPlayer>>, String> {
     unsafe {
         match (r, &spec.source) {
+            #[cfg(feature = "chromium")]
+            (Renderer::Chromium(c), Source::Url(u)) => {
+                c.load(u, generation);
+                Ok(None)
+            }
             (Renderer::Web { view, delegate }, src) => {
                 delegate.ivars().generation.set(generation);
                 match src {
@@ -548,6 +576,24 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
         let e = &v[key];
         unsafe {
             match (action, &e.renderer) {
+                #[cfg(feature = "chromium")]
+                ("browser.navigate", Renderer::Chromium(_)) => {
+                    let url = args
+                        .get("url")
+                        .and_then(Value::as_str)
+                        .ok_or("browser.navigate needs { url }")?;
+                    reload = Some(json!({ "kind": "chromium", "url": crate::normalize_url(url)? }));
+                    Ok(Value::Null)
+                }
+                #[cfg(feature = "chromium")]
+                ("focus", Renderer::Chromium(c)) => {
+                    if let Some(w) = e.view.window() {
+                        w.makeFirstResponder(Some(&e.view));
+                    }
+                    c.action("focus", args)
+                }
+                #[cfg(feature = "chromium")]
+                (a, Renderer::Chromium(c)) if a.starts_with("browser.") => c.action(a, args),
                 ("focus", _) => {
                     let w = e.view.window().ok_or("not in a window")?;
                     w.makeFirstResponder(Some(&e.view));
@@ -694,6 +740,8 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
 
 fn entry_state(e: &Entry, r: &Renderer) -> Value {
     let content = match r {
+        #[cfg(feature = "chromium")]
+        Renderer::Chromium(c) => c.state(),
         Renderer::Web { view, .. } => web_state(view),
         Renderer::Pdf { view, .. } => pdf_state(view),
         Renderer::Media { player, .. } => media_state(player.as_deref()),
@@ -738,6 +786,8 @@ pub fn dispose(key: &str) {
     };
     unsafe {
         match &e.renderer {
+            #[cfg(feature = "chromium")]
+            Renderer::Chromium(c) => c.close(),
             Renderer::Web { view, .. } => {
                 view.stopLoading();
                 view.setNavigationDelegate(None);
