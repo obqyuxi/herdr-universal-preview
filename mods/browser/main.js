@@ -63,6 +63,8 @@ export default class Browser extends View {
     if ("canGoBack" in d) { this.canBack = d.canGoBack; this.canForward = d.canGoForward; }
     if (event === "find.result") this.find = d;
     if (event === "download.start") this.downloads.set(d.id, { id: d.id, name: d.name, percent: 0, complete: false });
+    if (event === "import.done") this.importState = { done: d };
+    if (event === "import.error") this.importState = { error: d.message || "导入失败" };
     if (event === "download.update") this.downloads.set(d.id, { ...(this.downloads.get(d.id) ?? {}), ...d });
   }
 
@@ -136,6 +138,7 @@ export default class Browser extends View {
         .child(sep()))
       .child(this.item(t, "m-downloads", "下载", () => this.setPanel("downloads"), this.downloads.size ? String(this.downloads.size) : ""))
       .child(this.item(t, "m-history", "历史记录", () => this.setPanel("history"), this.history.length ? String(this.history.length) : ""))
+      .when(chromium && Boolean(this.start), el => el.child(this.item(t, "m-import", "导入 Chrome 登录…", () => { this.importState = null; this.setPanel("import"); })))
       .child(sep())
       .child(this.item(t, "m-clear", this.confirmClear ? "再点一次确认：清除登录状态、缓存和历史记录" : "清除浏览数据", () => {
         if (!this.confirmClear) { this.confirmClear = true; return; }
@@ -144,6 +147,39 @@ export default class Browser extends View {
         this.confirmClear = false;
         this.setPanel(null);
       }));
+  }
+
+  importPanel(t) {
+    const s = this.importState;
+    const btn = (id, label, primary, onClick) => div().id(id).px(12).h(30).flex().items_center().rounded(6).cursor_pointer()
+      .bg(primary ? t.accent : t.raised).text_color(primary ? (t.accent_foreground ?? t.background) : t.foreground)
+      .hover(x => x.bg(t.hover)).on_click((_e, cx) => { onClick(); cx.notify(); }).child(label);
+    const para = (text) => div().text_size(13).text_color(t.muted ?? t.foreground).child(text);
+    let body;
+    if (!s) {
+      body = v_flex().gap(8)
+        .child(para("会把你本机 Google Chrome（最近使用的那个资料）里的 Cookie 复制到这个侧边浏览器，这样大多数网站不用重新登录。"))
+        .child(para("macOS 会弹出钥匙串授权窗口（\"Chrome Safe Storage\"），点\"允许\"才能读取。数据只在本机内复制，不上传、不写日志；不导入密码；不会改动 Chrome 本身。"))
+        .child(para("同名的 Cookie 会被覆盖。导入后可用\"清除浏览数据\"全部删掉。"))
+        .child(h_flex().gap(8).pt(4)
+          .child(btn("imp-go", "开始导入", true, () => { this.importState = { running: true }; this.call("browser.importChromeCookies"); }))
+          .child(btn("imp-cancel", "取消", false, () => this.setPanel(null))));
+    } else if (s.running) {
+      body = v_flex().gap(8).child(para("正在读取 Chrome 的 Cookie……如果弹出钥匙串窗口，请点\"允许\"。"));
+    } else if (s.error) {
+      body = v_flex().gap(8).child(div().text_size(13).text_color(t.blocked).child(`没有导入：${s.error}`))
+        .child(h_flex().gap(8).child(btn("imp-retry", "重试", true, () => { this.importState = { running: true }; this.call("browser.importChromeCookies"); }))
+          .child(btn("imp-close", "关闭", false, () => this.setPanel(null))));
+    } else {
+      const d = s.done;
+      body = v_flex().gap(8)
+        .child(para(`已从 Chrome 资料「${d.profile}」导入 ${d.sites} 个网站的 ${d.cookies} 条 Cookie（跳过已过期或无法解密的 ${d.skipped} 条）。`))
+        .child(h_flex().gap(8).child(btn("imp-reload", "刷新当前页面", true, () => { this.setPanel(null); this.call("browser.reload"); }))
+          .child(btn("imp-done", "完成", false, () => this.setPanel(null))));
+    }
+    return v_flex().id("browser-import").p(12).gap(10)
+      .child(h_flex().items_center().child(div().flex_1().font_semibold().child("导入 Chrome 登录")).child(this.icon(t, "imp-x", "✕", true, () => this.setPanel(null))))
+      .child(body);
   }
 
   downloadsPanel(t) {
@@ -195,7 +231,8 @@ export default class Browser extends View {
         .child(div().size_full().bg(t.background)
           .when(this.panel === "menu", el => el.child(this.menu(t)))
           .when(this.panel === "downloads", el => el.child(this.downloadsPanel(t)))
-          .when(this.panel === "history", el => el.child(this.historyPanel(t))))))
+          .when(this.panel === "history", el => el.child(this.historyPanel(t)))
+          .when(this.panel === "import", el => el.child(this.importPanel(t))))))
       .when(!this.start && Boolean(this.panel), el => el.child(div().size_full().bg(t.background)
         .when(this.panel === "menu", el => el.child(this.menu(t)))
         .when(this.panel === "downloads", el => el.child(this.downloadsPanel(t)))
