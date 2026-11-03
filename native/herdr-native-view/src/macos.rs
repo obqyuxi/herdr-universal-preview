@@ -191,9 +191,20 @@ fn make(
         match spec.kind {
             Kind::Web => {
                 let config = WKWebViewConfiguration::new(mtm);
-                // This project's own, non-persistent WebKit data: never the
-                // person's Safari profile, nothing left on disk.
-                config.setWebsiteDataStore(&WKWebsiteDataStore::nonPersistentDataStore(mtm));
+                // Never the person's Safari/Chrome data: a throwaway store, or
+                // (persist) this app's own one.
+                let store = if spec.persist {
+                    // This app's own persistent store (bundle dev.herdr.app.preview-dev):
+                    // logins survive restarts; never Safari's or Chrome's data.
+                    WKWebsiteDataStore::defaultDataStore(mtm)
+                } else {
+                    WKWebsiteDataStore::nonPersistentDataStore(mtm)
+                };
+                config.setWebsiteDataStore(&store);
+                // Some sign-in pages refuse unknown embedded browsers; identify as Safari's engine.
+                config.setApplicationNameForUserAgent(Some(&NSString::from_str(
+                    "Version/26.0 Safari/605.1.15",
+                )));
                 config
                     .preferences()
                     .setJavaScriptCanOpenWindowsAutomatically(false);
@@ -506,6 +517,11 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
         ));
     }
     match action {
+        // The mod no longer shows this element: release the view now.
+        "dispose" => {
+            dispose(key);
+            return Ok(Value::Null);
+        }
         "setVisible" => {
             let on = args
                 .get("visible")

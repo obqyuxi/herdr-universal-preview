@@ -2,6 +2,15 @@
 
 ## 当前阶段
 
+**用户 2026-11-02 收窄范围**：只要两件事，验收以这两件事为准。
+
+1. Files 面板点 Word/Excel/PPT/PDF/图片/音视频就能直接看（`mods/files-plus`）。
+2. 顶栏"浏览器"按钮打开侧边浏览器：输入网址打开，登录状态保留（`mods/browser`，WebKit 持久存储，属于开发版自己）。
+
+入口：布局 `herdr-preview`，由 `scripts/dev app-install` 安装到测试 home。原先的 M1 全量清单（G1–G24）暂缓。
+
+（以下为原 M1 记录）
+
 M1（原生视图承载原型）：代码和宿主自检已完成，**正在等待人工 GUI 验收**（`tests/gui/M1_CHECKLIST.md`）。
 
 ## 最新提交

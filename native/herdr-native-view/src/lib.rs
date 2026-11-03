@@ -99,13 +99,14 @@ impl Kind {
     /// The only actions a mod may perform on a view of this kind. No action
     /// runs a shell, evaluates script text or reads arbitrary files.
     pub fn actions(self) -> &'static [&'static str] {
-        const COMMON: [&str; 4] = ["focus", "blur", "setVisible", "state"];
+        const COMMON: [&str; 5] = ["focus", "blur", "setVisible", "state", "dispose"];
         match self {
             Kind::Web => &[
                 "focus",
                 "blur",
                 "setVisible",
                 "state",
+                "dispose",
                 "browser.navigate",
                 "browser.back",
                 "browser.forward",
@@ -117,6 +118,7 @@ impl Kind {
                 "blur",
                 "setVisible",
                 "state",
+                "dispose",
                 "pdf.goToPage",
                 "pdf.next",
                 "pdf.previous",
@@ -129,6 +131,7 @@ impl Kind {
                 "blur",
                 "setVisible",
                 "state",
+                "dispose",
                 "media.play",
                 "media.pause",
                 "media.seek",
@@ -171,11 +174,15 @@ pub enum Source {
 pub struct Spec {
     pub kind: Kind,
     pub source: Source,
+    /// Web only: keep cookies and logins in this app's own persistent WebKit
+    /// store (separate from Safari/Chrome). Default: a throwaway store.
+    pub persist: bool,
 }
 
 impl Spec {
     /// Validates the props a mod passed: `{ kind, url }` or `{ kind, path, trust?, root? }`.
     pub fn parse(v: &Value) -> Result<Spec, String> {
+        let persist = v.get("persist").and_then(Value::as_bool).unwrap_or(false);
         let kind = Kind::parse(
             v.get("kind")
                 .and_then(Value::as_str)
@@ -188,6 +195,7 @@ impl Spec {
             return Ok(Spec {
                 kind,
                 source: Source::Url(normalize_url(url)?),
+                persist,
             });
         }
         let raw = v
@@ -223,6 +231,7 @@ impl Spec {
                 read_root,
                 trust,
             },
+            persist,
         })
     }
 
