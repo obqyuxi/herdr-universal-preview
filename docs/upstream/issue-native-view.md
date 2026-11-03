@@ -7,7 +7,7 @@ Title below; the two headings are the template fields.
 
 ### What did you try to build?
 
-Files previews that open PDF, Office documents, images, audio and video right in the panel (#91), and a side browser panel with persistent logins. I built both as ordinary mods, plus a layout, on a patched 0.1.12. The code is in https://github.com/luojimei/dd-up:
+Files previews that open PDF, Office documents, images, audio and video right in the panel (#91), and a side browser panel with persistent logins. I built both as ordinary mods, plus a layout, on a patched 0.1.12. The code is in https://github.com/obqyuxi/herdr-universal-preview:
 
 - `mods/files-plus` is a copy of the shipped Files. On click it opens PDF (PDFKit), Office/iWork/RTF/images (Quick Look) and audio/video (AVKit) in the preview area. Text and code still use the read-only `Editor`.
 - `mods/browser` is a browser panel with an address bar, back/forward/reload, find, zoom, print, downloads and history.
