@@ -34,10 +34,10 @@ scripts/install
 
 ## 用你自己的布局
 
-`dd-up` 布局是照官方 `main` 做的。你平时用的是别的布局（比如装了 space-folders 的 `main-folders`）时，可以在它的基础上生成一份带 DD-up 功能的布局：
+默认的 `dd-up` 布局是照官方 `main` 做的。你平时用的是别的布局（比如装了 space-folders 的 `main-folders`）时，可以让 `dd-up` 改为在它的基础上生成：
 
 ```sh
-scripts/install --layout-from main-folders   # 生成 layouts/dd-up-main-folders.json
+scripts/install --layout-from main-folders
 ```
 
-它只改这三处：Files 换成 files-plus，顶栏换成 tabs-plus，Files 所在的面板里加一个浏览器（面板默认宽度至少 560）。其余设置原样保留，比如侧边栏用的 mod、尺寸和颜色。原布局文件不会被改动。这一步会记进安装清单，以后重新安装时会按原布局的最新内容重新生成，卸载时一并删除。DD-up 运行时也可以执行。
+始终只有一个 `dd-up` 布局。生成时只做三处修改：Files 换成 files-plus，顶栏换成 tabs-plus，Files 所在的面板里加一个浏览器（面板默认宽度至少 560）。其余的侧边栏 mod、尺寸和颜色原样保留，原布局文件也不会被改动。选择会记进安装清单，之后执行 `scripts/install` 时会按原布局的最新内容重新生成。如果这次只替换 mod 和布局、App 本身没变，DD-up 开着时也能执行（mod 会热加载）。

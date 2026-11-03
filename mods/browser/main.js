@@ -1,6 +1,6 @@
-// browser (herdr-universal-preview): a web page inside Herdr's side panel.
-// Type an address and press Enter. Chromium when the host has it (Herdr
-// Preview Dev with CEF), else WebKit. Logins are kept in this app's own
+// browser (DD-up): a web page inside Herdr's side panel.
+// Type an address and press Enter. Chromium when the host has it (DD-up
+// with CEF), else WebKit. Logins are kept in this app's own
 // profile, separate from Safari and Chrome.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -28,9 +28,9 @@ export default class Browser extends View {
     this.canBack = false;
     this.canForward = false;
     this.title = "";
-    this.input = InputState.new({ placeholder: "输入网址，回车打开（例如 github.com 或 localhost:3000）", value: this.start ?? "" });
+    this.input = InputState.new({ value: this.start ?? "" });
     this.input.on("submit", (_e, cx) => this.go(this.input.value(), cx));
-    this.findInput = InputState.new({ placeholder: "在页面中查找" });
+    this.findInput = InputState.new({ placeholder: "查找" });
     this.findInput.on("change", (_e, cx) => this.runFind(false, true, cx));
     this.findInput.on("submit", (e, cx) => this.runFind(true, !e?.shift, cx));
     if (!hasNative()) return;
@@ -75,9 +75,12 @@ export default class Browser extends View {
     localStorage.setItem("browser.history", JSON.stringify(this.history));
   }
 
+  // Before the first address there is no page to talk to. A failed call is a
+  // bug on our side, not something the person can act on: log it, don't show it.
   call(action, args) {
+    if (!this.start) return null;
     try { return herdr.nativeViewCall(ID, action, args ?? {}); }
-    catch (e) { this.error = String(e?.message ?? e); return null; }
+    catch (e) { console.log(`browser: ${action}: ${e?.message ?? e}`); return null; }
   }
 
   go(text, cx) {
@@ -96,7 +99,7 @@ export default class Browser extends View {
   setPanel(panel) {
     this.panel = panel;
     this.confirmClear = false;
-    if (this.start) this.call("setVisible", { visible: panel === null });
+    this.call("setVisible", { visible: panel === null });
     if (panel === "menu") this.zoom = this.call("state")?.content?.zoomLevel ?? this.zoom;
   }
 
@@ -142,7 +145,7 @@ export default class Browser extends View {
       .child(sep())
       .child(this.item(t, "m-clear", this.confirmClear ? "再点一次确认：清除登录状态、缓存和历史记录" : "清除浏览数据", () => {
         if (!this.confirmClear) { this.confirmClear = true; return; }
-        if (this.start && chromium) this.call("browser.clearData");
+        if (chromium) this.call("browser.clearData");
         this.history = []; localStorage.removeItem("browser.history");
         this.confirmClear = false;
         this.setPanel(null);
@@ -186,7 +189,7 @@ export default class Browser extends View {
     const list = [...this.downloads.values()].reverse();
     return v_flex().id("browser-downloads").p(8).gap(2).text_size(13)
       .child(h_flex().h(30).px(6).items_center().child(div().flex_1().font_semibold().child("下载")).child(this.icon(t, "d-close", "✕", true, () => this.setPanel(null))))
-      .when(!list.length, el => el.child(div().p(8).text_color(t.dim).child("还没有下载。网页上点下载链接时，会先让你选择保存位置。")))
+      .when(!list.length, el => el.child(div().p(8).text_color(t.dim).child("还没有下载")))
       .children(list.map((d) => h_flex().id(`dl-${d.id}`).h(34).px(6).gap(8).items_center()
         .child(div().flex_1().min_w(0).truncate().child(d.name || "下载"))
         .child(div().text_size(12).text_color(t.dim).child(d.canceled ? "已取消" : d.complete ? "完成" : `${Math.max(0, d.percent ?? 0)}%`))
@@ -196,10 +199,10 @@ export default class Browser extends View {
   historyPanel(t) {
     return v_flex().id("browser-history").size_full().min_h(0).p(8).gap(1).text_size(13)
       .child(h_flex().h(30).px(6).items_center().child(div().flex_1().font_semibold().child("历史记录")).child(this.icon(t, "h-close", "✕", true, () => this.setPanel(null))))
-      .when(!this.history.length, el => el.child(div().p(8).text_color(t.dim).child("还没有浏览记录。")))
+      .when(!this.history.length, el => el.child(div().p(8).text_color(t.dim).child("还没有浏览记录")))
       .child(v_flex().id("history-list").flex_1().min_h(0).overflow_y_scrollbar()
         .children(this.history.slice(0, 100).map((h, i) => v_flex().id(`h-${i}`).px(8).py(4).rounded(6).cursor_pointer().hover(s => s.bg(t.hover))
-          .on_click((_e, cx) => { this.setPanel(null); this.call("browser.navigate", { url: h.url }); cx.notify(); })
+          .on_click((_e, cx) => { this.input.set_value(h.url); this.go(h.url, cx); })
           .child(div().truncate().child(h.title || h.url))
           .child(div().truncate().text_size(11).text_color(t.dim).child(h.url)))));
   }
@@ -208,7 +211,7 @@ export default class Browser extends View {
     const t = herdr.theme();
     if (!hasNative()) {
       return v_flex().size_full().p(16).bg(t.background).text_color(t.dim).text_size(13)
-        .child("当前 Herdr 版本不能在窗口内显示网页（需要 Herdr Preview Dev）。");
+        .child("这个版本的 Herdr 不能在窗口里显示网页，需要 DD-up。");
     }
     const bar = h_flex().h(40).flex_none().px(6).gap(2).items_center().border_b(1).border_color(t.border)
       .child(this.icon(t, "b-back", "←", this.canBack, () => this.call("browser.back")))
@@ -226,7 +229,6 @@ export default class Browser extends View {
       ? div().px(10).py(3).flex_none().text_size(11).truncate().text_color(t.blocked).child(`打不开：${this.error}`)
       : null;
     const page = div().flex_1().min_h(0).relative()
-      .when(!this.start && !this.panel, el => el.child(div().p(16).text_color(t.dim).text_size(13).child("在上面输入网址，回车打开")))
       .when(Boolean(this.start), el => el.child(herdr.nativeView.new(ID, { kind: this.engine, url: this.start, persist: true })
         .child(div().size_full().bg(t.background)
           .when(this.panel === "menu", el => el.child(this.menu(t)))
