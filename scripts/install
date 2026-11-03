@@ -4,8 +4,14 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 case ${1:-} in
+  --layout-from) shift; exec /usr/bin/python3 -I "$here/lib/install.py" add-layout "$@" ;;
   -h|--help) cat <<USAGE
 Usage: scripts/install [--dry-run] [--app-dir DIR]
+       scripts/install --layout-from NAME [--dry-run]
+
+  --layout-from NAME  add layouts/<LAYOUT>-NAME.json: your own layout NAME with
+              Files -> files-plus, tabs -> tabs-plus and a browser panel; NAME itself
+              is left as it is. Remembered, so later installs regenerate it.
 
   Build first: scripts/build --daily (artifacts/apps.noindex/<APP_NAME>.app).
   Adds  DIR/<APP_NAME>.app (default ~/Applications),

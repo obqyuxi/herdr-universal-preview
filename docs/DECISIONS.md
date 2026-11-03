@@ -128,3 +128,11 @@
   1. 临时名和旧版本名改为隐藏且保留后缀（`.DD-up.hup-tmp-<pid>.app`）。
   2. 构建产物统一放进 `artifacts/apps.noindex/`，Spotlight 不索引 `.noindex` 目录。
   3. 用 `lsregister -u` 注销旧路径和辅助程序的注册，然后重新安装。之后 Spotlight 和 LaunchServices 里都只剩 `~/Applications/DD-up.app`。
+
+## D16 基于用户自己的布局生成 DD-up 布局（2026-11-03）
+
+- 现象：切到 `dd-up` 布局后，用户今天装的 space-folders 侧边栏不见了。`dd-up` 是照官方 `main` 做的，而用户平时用的是 `main-folders`。数据都在，切回 `main-folders` 就恢复了。
+- 新增 `scripts/install --layout-from NAME`，在用户的布局上只做三处修改，生成 `dd-up-NAME`；原文件不动，生成的布局计入清单（`bases` 字段），重新安装时会再生成一次。用户已经切换到 `dd-up-main-folders`。
+- 顺带修了两处：
+  - 指纹计算忽略 mod 目录下的 `*.d.ts`。Herdr 每次启动都会按自己的版本重写这些文件，否则重新安装时会被误判成"用户改过"。真实清单已备份并刷新，刷新前确认过除 `.d.ts` 以外的内容与仓库一致。
+  - "是否在运行"只检查要被替换的那一份 App，在临时目录演练时不会被正在运行的日用版挡住。

@@ -31,3 +31,13 @@ scripts/install
 ## 改名
 
 修改 `brand.env`，然后按顺序执行：`scripts/uninstall`（**用旧名字的代码**，先卸掉旧名字的安装）、`scripts/build --daily`、`scripts/install`。浏览器资料按可执行文件名分目录存放，改名后会从空的资料开始。
+
+## 用你自己的布局
+
+`dd-up` 布局是照官方 `main` 做的。你平时用的是别的布局（比如装了 space-folders 的 `main-folders`）时，可以在它的基础上生成一份带 DD-up 功能的布局：
+
+```sh
+scripts/install --layout-from main-folders   # 生成 layouts/dd-up-main-folders.json
+```
+
+它只改这三处：Files 换成 files-plus，顶栏换成 tabs-plus，Files 所在的面板里加一个浏览器（面板默认宽度至少 560）。其余设置原样保留，比如侧边栏用的 mod、尺寸和颜色。原布局文件不会被改动。这一步会记进安装清单，以后重新安装时会按原布局的最新内容重新生成，卸载时一并删除。DD-up 运行时也可以执行。

@@ -36,8 +36,9 @@ def fingerprint(p: Path) -> str:
         return h.hexdigest()
     for f in sorted(x for x in p.rglob("*") if x.is_file() and not x.is_symlink()):
         rel = f.relative_to(p).as_posix()
-        # The app writes nothing into mod folders, but macOS may add these.
-        if rel.endswith(".DS_Store"):
+        # Herdr rewrites each mod's type files on start (gpui-kit.d.ts, herdr.d.ts)
+        # to match its own build; macOS may add .DS_Store. Neither is a user change.
+        if rel.endswith(".DS_Store") or rel.endswith(".d.ts"):
             continue
         h.update(rel.encode() + b"\0" + hashlib.sha256(f.read_bytes()).digest())
     return h.hexdigest()
@@ -60,7 +61,8 @@ def load_manifest():
 def running(app: Path) -> list:
     out = subprocess.run(["ps", "-axo", "pid=,comm="], capture_output=True, text=True).stdout
     exe = str(app / "Contents/MacOS" / EXE)
-    return [l.split()[0] for l in out.splitlines() if exe in l or l.strip().endswith("/" + EXE)]
+    # Only the copy being replaced matters (a test install elsewhere may run beside it).
+    return [l.split()[0] for l in out.splitlines() if l.split(None, 1)[-1].strip() == exe]
 
 
 def official_version():
@@ -73,6 +75,52 @@ def official_version():
 def die(msg, code=1):
     print(f"error: {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def derive_layout(base: str) -> dict:
+    """The person's own layout with DD-up's changes: Files -> files-plus, tabs -> tabs-plus,
+    a browser block in the stack that holds Files, and a wider panel. Everything else
+    (their sidebar mods, sizes, colors) stays as it is."""
+    if not base or "/" in base or base.startswith(".") or base.startswith(f"{LAYOUT}-") or base == LAYOUT:
+        die(f"not a layout to build on: {base!r}")
+    src = APP_HOME / "layouts" / f"{base}.json"
+    if not src.is_file():
+        die(f"no layout {base!r} in {APP_HOME / 'layouts'}")
+    doc = json.loads(src.read_text())
+    found = {"files": 0, "tabs": 0, "stack": 0}
+
+    def walk(node, parent):
+        content = node.get("content")
+        if isinstance(content, dict) and content.get("mod") == "files":
+            content["mod"] = "files-plus"; found["files"] += 1
+        if isinstance(content, dict) and content.get("mod") == "tabs":
+            content["mod"] = "tabs-plus"; found["tabs"] += 1
+        kids = node.get("children", [])
+        if node.get("type") == "stack" and any(isinstance(k.get("content"), dict) and k["content"].get("mod") in ("files", "files-plus") for k in kids):
+            if not any(isinstance(k.get("content"), dict) and k["content"].get("mod") == "browser" for k in kids):
+                kids.append({"id": "browser", "type": "block", "content": {"mod": "browser"}})
+            found["stack"] += 1
+            if parent is not None and isinstance(parent.get("size"), dict) and parent["size"].get("px", 0) < 560:
+                parent["size"]["px"] = 560
+                parent["max"] = max(parent.get("max", 0), 1400)
+        for k in kids:
+            walk(k, node)
+
+    walk(doc, None)
+    if not (found["files"] and found["tabs"] and found["stack"]):
+        die(f"layout {base!r} has no Files panel stack and tabs bar to extend ({found}); use the {LAYOUT} layout instead")
+    return doc
+
+
+def derived_items(bases):
+    items = []
+    tmpdir = Path(os.environ.get("TMPDIR", "/tmp")) / f"hup-layouts-{os.getpid()}"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    for base in bases:
+        src = tmpdir / f"{LAYOUT}-{base}.json"
+        src.write_text(json.dumps(derive_layout(base), indent=2, ensure_ascii=False) + "\n")
+        items.append(("layout", APP_HOME / "layouts" / f"{LAYOUT}-{base}.json", src))
+    return items
 
 
 def plan_install(app_dir: Path):
@@ -93,6 +141,7 @@ def plan_install(app_dir: Path):
     items = [("app", app_dir / f"{NAME}.app", BUILT)]
     items += [("mod", APP_HOME / "mods" / m, ROOT / "mods" / m) for m in MODS]
     items += [("layout", APP_HOME / "layouts" / f"{LAYOUT}.json", ROOT / "layouts/herdr-preview.json.in")]
+    items += derived_items(old.get("bases", []))
     actions, conflicts = [], []
     for kind, dst, src in items:
         if dst.exists():
@@ -107,7 +156,7 @@ def plan_install(app_dir: Path):
             actions.append(("replace", kind, dst, src))
         else:
             actions.append(("add", kind, dst, src))
-    return built_ver, actions, conflicts
+    return built_ver, actions, conflicts, old.get("bases", [])
 
 
 def copy_atomic(src: Path, dst: Path):
@@ -132,7 +181,7 @@ def copy_atomic(src: Path, dst: Path):
 
 
 def install(app_dir: Path, dry: bool):
-    built_ver, actions, conflicts = plan_install(app_dir)
+    built_ver, actions, conflicts, bases = plan_install(app_dir)
     print(f"{NAME} {built_ver} (official Herdr {official_version() or 'not found'}), home {APP_HOME}")
     for a, kind, dst, _ in actions:
         print(f"  {a:8} {kind:6} {dst}")
@@ -152,8 +201,27 @@ def install(app_dir: Path, dry: bool):
         entries.append({"kind": kind, "path": str(dst), "sha256": app_fingerprint(dst) if kind == "app" else fingerprint(dst)})
     STATE.mkdir(parents=True, exist_ok=True)
     rev = plistlib.loads((BUILT / "Contents/Info.plist").read_bytes()).get("CFBundleVersion")
-    MANIFEST.write_text(json.dumps({"installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "build": rev, "home": str(APP_HOME), "entries": entries}, indent=2, ensure_ascii=False) + "\n")
+    MANIFEST.write_text(json.dumps({"installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "build": rev, "home": str(APP_HOME), "bases": bases, "entries": entries}, indent=2, ensure_ascii=False) + "\n")
     print(f"installed; manifest: {MANIFEST}")
+
+
+def add_layout(base: str, dry: bool):
+    m = load_manifest()
+    if not m:
+        die(f"{NAME} is not installed: run scripts/install first")
+    (kind, dst, src), = derived_items([base])
+    prev = {e["path"]: e for e in m["entries"]}.get(str(dst))
+    if dst.exists() and (not prev or prev["sha256"] != fingerprint(dst)):
+        die(f"{dst} exists and isn't an unchanged copy from this project; move it aside first")
+    print(f"  {'replace' if dst.exists() else 'add':8} layout {dst}  (from {base}.json, which stays as it is)")
+    if dry:
+        print("dry run: nothing changed")
+        return
+    copy_atomic(src, dst)
+    m["entries"] = [e for e in m["entries"] if e["path"] != str(dst)] + [{"kind": "layout", "path": str(dst), "sha256": fingerprint(dst)}]
+    m["bases"] = sorted(set(m.get("bases", [])) | {base})
+    MANIFEST.write_text(json.dumps(m, indent=2, ensure_ascii=False) + "\n")
+    print(f"added; switch with ctrl-shift-l or: layout.switch {{\"name\":\"{LAYOUT}-{base}\"}}")
 
 
 def uninstall(dry: bool, purge: bool):
@@ -200,6 +268,8 @@ if __name__ == "__main__":
     if cmd == "install":
         app_dir = Path(next((rest[i + 1] for i, a in enumerate(rest) if a == "--app-dir"), HOME / "Applications"))
         install(app_dir, dry)
+    elif cmd == "add-layout":
+        add_layout(next((a for a in rest if not a.startswith("--")), ""), dry)
     elif cmd == "uninstall":
         uninstall(dry, "--purge-data" in rest)
     else:
