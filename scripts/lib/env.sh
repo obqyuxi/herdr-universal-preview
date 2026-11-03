@@ -63,6 +63,7 @@ hup_isolate() {
   export HC_INSTALL_DIR=$HUP_BIN             # a core install, if ever triggered, lands here
   export HERDR_APP_NO_SOUND=1
   export HUP_CHROMIUM_PROFILE=$HUP_LOCAL/chromium-profile   # never the person's Chrome profile
+  export HUP_CHROMIUM_MOCK_KEYCHAIN=1   # test builds never touch the login keychain (see chromium.rs)
   export HERDR_TELEMETRY=0                   # source builds never send; also keep it off locally
   mkdir -p "$HUP_LOCAL/state" "$HUP_LOCAL/config" "$HUP_APP_HOME" "$HUP_LOGS" "$HUP_RUN"
 }

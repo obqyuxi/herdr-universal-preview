@@ -182,3 +182,23 @@
   - 每张卡片在隔离环境里截图检查过（`.local/ui-*.png`，不入库）。
   - impeccable detect 没有发现问题。
   - Chromium 自检 6/6 通过；打开历史卡片时有遮罩，洞内点击落到 Herdr。
+
+## D21 卡片阴影、网站图标、加载进度、快捷键；测试构建改用模拟钥匙串（2026-11-03）
+
+- 阴影：`HoleHost` 给每个洞叠加一层 CALayer 阴影（`shadowPath` 与洞的圆角矩形相同，不透明度 0.18，半径 14，向下偏移 6）。洞本身被遮罩挖空，阴影只落在卡片外的网页上。state 新增 `shadow` 字段。
+- 网站图标：
+  - Chromium 报告 favicon 地址后，用 `download_image`（64px）下载，转成 PNG，存到 `<app home>/data/browser/favicons/<host>.png`。文件名只取纯主机名，见 `favicon_host` 及其测试。
+  - mod 记下 host 到路径的对应关系，常用网站页和历史记录用 `image()` 显示。
+  - 注意 cef-rs 的坑：借用的 `CefStringList` 调 `clone()` 或转成 `*const` 都会得到空列表，必须用 `std::mem::take` 取出原包装再迭代。
+- 加载进度：转发 `on_loading_progress_change`，事件为 `load.progress`，state 新增 `progress`。工具栏底边显示 2px 强调色进度条，用绝对定位，不会挤动布局。
+- 快捷键：
+  - 网页获得键盘焦点时，`on_pre_key_event` 拦截 ⌘L、⌘F、⌘R、⌘[、⌘]、⌘=、⌘-、⌘0 交给 mod 处理；Esc 也通知 mod，同时照常传给网页。
+  - 焦点在 Herdr 一侧时，由 mod 的 `on_key_down` 处理 ⌘L、⌘F、Esc。
+  - ⌘L 和 ⌘F 会先把键盘焦点交回 Herdr，再聚焦地址栏或查找框。
+- **钥匙串（本轮查到的根因）**：CEF 在 macOS 上用固定名称的钥匙串条目 "Chromium Safe Storage" 加密 Cookie，名称不能改（CEF 二进制里只有 `use-mock-keychain` 开关）。每次重新编译，临时签名都会变，macOS 就要重新询问能否读取该条目。没人回答之前，所有网络请求都卡在 0.1。
+  - 测试构建（`hup_isolate` 和开发版的 LSEnvironment）设置 `HUP_CHROMIUM_MOCK_KEYCHAIN=1`，即 `--use-mock-keychain`，不再弹窗。
+  - 日用版怎么处理，等用户决定。
+- 验证：
+  - 原生单元测试 12 项通过；Chromium 6/6、网页与 PDF 13/13、音视频与 Quick Look 7/7 全部通过。
+  - 4 个网站的图标保存成功，图标、历史记录和加载进度条都截图看过；impeccable detect 没有发现问题。
+  - 快捷键需要真实按键才能触发，没有自动测试。
