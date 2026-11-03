@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Read-only health check of this project and the machine it builds on.
+# Changes nothing; exit code 1 if something required is missing.
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+
+case ${1:-} in
+  -h|--help) echo "Usage: scripts/doctor   (read-only; prints machine, toolchain, upstream, isolation and official-install facts)"; exit 0 ;;
+  "") ;;
+  *) echo "Usage: scripts/doctor" >&2; exit 2 ;;
+esac
+
+fail=0
+ok() { printf '  ok    %s\n' "$*"; }
+bad() { printf '  MISS  %s\n' "$*"; fail=1; }
+info() { printf '  info  %s\n' "$*"; }
+
+echo "machine"
+info "macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion)), $(uname -m), $(( $(sysctl -n hw.memsize) / 1073741824 )) GiB RAM"
+info "free disk: $(df -h "$HUP_ROOT" | awk 'NR==2{print $4}')"
+if xcrun --show-sdk-path >/dev/null 2>&1; then ok "macOS SDK $(xcrun --show-sdk-version) at $(xcode-select -p)"; else bad "no macOS SDK (install Command Line Tools)"; fi
+
+echo "toolchain (project-local)"
+if "$HUP_ROOT/scripts/bootstrap-toolchain" --check >/dev/null 2>&1; then
+  "$HUP_ROOT/scripts/bootstrap-toolchain" --check | sed 's/^/  ok    /'
+else
+  bad "toolchain incomplete: run scripts/bootstrap-toolchain"
+fi
+
+echo "upstream"
+lockc=$(/usr/bin/python3 -c "import json;print(json.load(open('$HUP_ROOT/upstream.lock.json'))['herdr_app']['commit'])")
+if [[ -d $HUP_UPSTREAM/.git ]]; then
+  base=$(git -C "$HUP_UPSTREAM" merge-base HEAD "$lockc" 2>/dev/null || true)
+  [[ $base == "$lockc" ]] && ok "work copy based on $lockc ($(git -C "$HUP_UPSTREAM" rev-parse --abbrev-ref HEAD))" || bad "work copy not based on pinned $lockc"
+  shopt -s nullglob; pl=("$HUP_ROOT"/patches/herdr-app/*.patch); n=${#pl[@]}; shopt -u nullglob
+  info "$n patch file(s) in patches/herdr-app"
+else
+  bad "no work copy: run scripts/prepare-upstream"
+fi
+
+echo "test environment"
+[[ -x $HUP_HC ]] && ok "test core binary $HUP_HC ($("$HUP_HC" --version))" || bad "test core binary missing: scripts/dev core-install"
+[[ -x $HUP_DEV_EXE ]] && ok "dev app $HUP_DEV_APP" || info "dev app not built yet (scripts/build)"
+if [[ -L $HUP_SHORT ]]; then ok "$HUP_SHORT -> $(readlink "$HUP_SHORT")"; else info "$HUP_SHORT not created yet (made on first scripts/dev use)"; fi
+
+echo "official Herdr (read-only)"
+[[ -d $OFFICIAL_APP ]] && info "$OFFICIAL_APP $(defaults read "$OFFICIAL_APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)" || info "no $OFFICIAL_APP"
+hup_official_snapshot | sed 's/^/  info  /'
+exit $fail

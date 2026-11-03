@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Project tests. Each layer is reported separately: static checks, unit tests,
+# patch reproducibility, upstream tests. None of these is a GUI acceptance.
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+
+usage() {
+  cat <<EOF
+Usage: scripts/test [--patches] [--upstream] [--mods] [--all]
+
+  (default)   static checks (bash -n, shellcheck if present, JSON) and native crate
+              unit tests + clippy
+  --patches   also: fresh clone of the pinned commit, all patches must apply
+  --upstream  also: cargo test --locked in the work copy (isolated env)
+  --mods      also: herdr-app check for each mods/* folder with the dev app
+  --all       everything above
+EOF
+}
+
+patches=0 upstream=0 mods=0
+while (($#)); do
+  case $1 in
+    -h|--help) usage; exit 0 ;;
+    --patches) patches=1 ;;
+    --upstream) upstream=1 ;;
+    --mods) mods=1 ;;
+    --all) patches=1 upstream=1 mods=1 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+fail=0
+step() { printf '\n== %s\n' "$*"; }
+result() { if [[ $1 == 0 ]]; then echo "PASS $2"; else echo "FAIL $2"; fail=1; fi; }
+
+step "static: shell syntax"
+rc=0
+for f in "$HUP_ROOT"/scripts/* "$HUP_ROOT"/scripts/lib/*.sh; do
+  [[ -f $f ]] || continue
+  bash -n "$f" || rc=1
+done
+result $rc "bash -n scripts/*"
+if command -v shellcheck >/dev/null; then
+  shellcheck -x -S warning "$HUP_ROOT"/scripts/* "$HUP_ROOT"/scripts/lib/*.sh && result 0 shellcheck || result 1 shellcheck
+else
+  echo "skip shellcheck (not installed)"
+fi
+
+step "static: JSON files parse"
+rc=0
+while IFS= read -r -d '' j; do
+  /usr/bin/python3 -m json.tool "$j" >/dev/null 2>&1 || { echo "bad JSON: ${j#"$HUP_ROOT"/}"; rc=1; }
+done < <(find "$HUP_ROOT" -path "$HUP_ROOT/.work" -prune -o -path "$HUP_ROOT/.local" -prune -o -path "$HUP_ROOT/artifacts" -prune -o -name '*.json' -print0)
+result $rc "JSON"
+
+step "unit: native/herdr-native-view"
+hup_toolchain
+export CARGO_TARGET_DIR=$HUP_LOCAL/target-native
+(cd "$HUP_ROOT/native/herdr-native-view" && cargo test --quiet 2>&1 | grep -E "test result|FAILED|panicked") && result 0 "cargo test (native)" || result 1 "cargo test (native)"
+(cd "$HUP_ROOT/native/herdr-native-view" && cargo clippy --quiet -- -D warnings 2>&1 | tail -20) && result 0 "clippy (native)" || result 1 "clippy (native)"
+(cd "$HUP_ROOT/native/herdr-native-view" && cargo fmt --check >/dev/null 2>&1) && result 0 "rustfmt (native)" || echo "note: rustfmt differences in native (not enforced)"
+unset CARGO_TARGET_DIR
+
+if [[ -d $HUP_ROOT/tests/unit ]] && compgen -G "$HUP_ROOT/tests/unit/*.test.mjs" >/dev/null; then
+  step "unit: mods (node --test)"
+  node --test "$HUP_ROOT"/tests/unit/*.test.mjs && result 0 "mod unit tests" || result 1 "mod unit tests"
+fi
+
+if (( patches )); then
+  step "patches: apply to a fresh clone"
+  "$HUP_ROOT/scripts/prepare-upstream" --check && result 0 "patches apply" || result 1 "patches apply"
+fi
+
+if (( upstream )); then
+  step "upstream: cargo test --locked (isolated env)"
+  log=$HUP_LOGS/upstream-test.log
+  ( hup_isolate; cd "$HUP_UPSTREAM" && cargo test --locked ) >"$log" 2>&1 && result 0 "upstream tests ($log)" || { tail -30 "$log"; result 1 "upstream tests ($log)"; }
+fi
+
+if (( mods )); then
+  step "mods: herdr-app check (dev app)"
+  for m in "$HUP_ROOT"/mods/*/; do
+    [[ -f $m/mod.json ]] || continue
+    "$HUP_ROOT/scripts/dev" app check "$m" && result 0 "check ${m#"$HUP_ROOT"/}" || result 1 "check ${m#"$HUP_ROOT"/}"
+  done
+fi
+
+echo
+if (( fail )); then echo "some checks FAILED"; else echo "all selected checks passed (not a GUI acceptance)"; fi
+exit $fail

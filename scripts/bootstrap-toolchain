@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Install the build toolchain into the project only (.local/toolchain):
+# Rust (rustup, pinned toolchain) and Zig, both checksum-verified.
+# Never edits shell profiles, global PATH, Homebrew or system directories.
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+
+usage() {
+  cat <<EOF
+Usage: scripts/bootstrap-toolchain [--check]
+
+Installs, into $HUP_TOOLCHAIN:
+  rust  $(jq_lock rust) via rustup (--no-modify-path, minimal profile)
+  zig   $(jq_lock zig)  official tarball, sha256 from ziglang.org index.json
+
+  --check   report what is installed; install nothing (exit 1 if incomplete)
+EOF
+}
+jq_lock() { /usr/bin/python3 -c "import json;print(json.load(open('$HUP_ROOT/upstream.lock.json'))['toolchain']['$1'])"; }
+
+check=0
+case ${1:-} in
+  -h|--help) usage; exit 0 ;;
+  --check) check=1 ;;
+  "") ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+RUST=$(jq_lock rust); ZIGV=$(jq_lock zig)
+hup_toolchain
+mkdir -p "$HUP_TOOLCHAIN"
+
+have_rust() { [[ -x $CARGO_HOME/bin/rustc ]] && "$CARGO_HOME/bin/rustc" --version | grep -q " $RUST "; }
+have_zig() { [[ -x $ZIG ]] && [[ $("$ZIG" version) == "$ZIGV" ]]; }
+
+if (( check )); then
+  ok=0
+  have_rust && echo "rust: $("$CARGO_HOME/bin/rustc" --version)" || { echo "rust: missing ($RUST)"; ok=1; }
+  have_zig && echo "zig: $("$ZIG" version)" || { echo "zig: missing ($ZIGV)"; ok=1; }
+  exit $ok
+fi
+
+tmp=$(mktemp -d "$HUP_TOOLCHAIN/dl.XXXX"); trap 'rm -rf "$tmp"' EXIT
+
+if ! have_rust; then
+  echo "== rustup-init (aarch64-apple-darwin)"
+  base=https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin
+  curl -fsSL "$base/rustup-init" -o "$tmp/rustup-init"
+  want=$(curl -fsSL "$base/rustup-init.sha256" | awk '{print $1}')
+  got=$(shasum -a 256 "$tmp/rustup-init" | awk '{print $1}')
+  [[ $want == "$got" ]] || hup_die "rustup-init checksum mismatch ($got != $want)"
+  chmod +x "$tmp/rustup-init"
+  "$tmp/rustup-init" -y --no-modify-path --profile minimal --default-toolchain "$RUST" \
+    --component rustfmt --component clippy
+  have_rust || hup_die "rust $RUST not usable after install"
+fi
+echo "rust: $("$CARGO_HOME/bin/rustc" --version)"
+
+if ! have_zig; then
+  echo "== zig $ZIGV (aarch64-macos)"
+  read -r url sum < <(curl -fsSL https://ziglang.org/download/index.json | /usr/bin/python3 -c \
+    "import json,sys;d=json.load(sys.stdin)['$ZIGV']['aarch64-macos'];print(d['tarball'],d['shasum'])")
+  curl -fsSL "$url" -o "$tmp/zig.tar.xz"
+  got=$(shasum -a 256 "$tmp/zig.tar.xz" | awk '{print $1}')
+  [[ $got == "$sum" ]] || hup_die "zig checksum mismatch ($got != $sum)"
+  rm -rf "$HUP_TOOLCHAIN/zig"; mkdir -p "$HUP_TOOLCHAIN/zig"
+  tar -xJf "$tmp/zig.tar.xz" -C "$HUP_TOOLCHAIN/zig" --strip-components 1
+  have_zig || hup_die "zig $ZIGV not usable after install"
+fi
+echo "zig: $("$ZIG" version)"
