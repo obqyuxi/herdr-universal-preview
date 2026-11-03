@@ -87,3 +87,17 @@
 - **用户隐私**：导入 Chrome 登录要读取用户 Chrome 的 Cookie/密码，并经过钥匙串授权。真正执行前要再次单独确认。
 - **已知不确定**：CEF 对 Chrome 扩展支持有限；Chrome style 浏览器在 macOS 上能否挂到原生父视图，需要实测。
 - **WebKit 版保留**：作为原版 Herdr 不可用时的后备，以及 Chromium 失败时的回退。
+
+## D11 日用安装：独立的 Herdr Plus，与官方 Herdr 并列（用户批准，2026-11-02）
+
+- 安装到 `~/Applications/Herdr Plus.app`，共用 `~/.config/herdr-app` 和官方 herdr-core。只新增 3 个 mod 和 1 个布局，并记录带指纹的清单。官方 Herdr.app 没有被覆盖，可以用 `scripts/rollback` 回退。
+- 不自动更新：官方升级后，需要在新的上游上重新打补丁、编译、安装。
+
+## D12 开源分发方向（待用户决定）
+
+- 现状：mod 是普通插件，但窗口内嵌原生内容依赖宿主补丁，所以单装插件在原版上做不到预览和浏览器。
+- 选项：
+  1. 发布已签名、已公证的 Herdr Plus，加一键安装脚本（需要 Apple Developer ID）；
+  2. 向上游提交窄接口 `nativeView`；被接受后就是纯 mod 安装（WebKit 版的接受可能性更高）；
+  3. 一键脚本从源码编译。
+- 建议 1 和 2 并行。

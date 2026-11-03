@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Go back to the official Herdr: uninstall Herdr Plus, then reopen Herdr.app.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+case ${1:-} in
+  -h|--help) echo "Usage: scripts/rollback [--dry-run]   (scripts/uninstall, then open /Applications/Herdr.app)"; exit 0 ;;
+esac
+"$here/uninstall" "$@"
+if [[ ${1:-} != --dry-run ]]; then
+  echo "Opening the official Herdr; your terminals and agents are still in herdr-core."
+  open -a /Applications/Herdr.app
+fi
