@@ -290,6 +290,24 @@ pub fn create(
     ))
 }
 
+/// Starts copying Chrome's cookies into this app's profile. `key` receives the
+/// result (`import.done` / `import.error`); it may have no view yet, so this
+/// starts Chromium itself if needed.
+pub fn import_chrome_cookies(mtm: MainThreadMarker, key: &str, generation: Option<Arc<std::sync::atomic::AtomicU64>>) -> Result<Value, String> {
+    ensure_started(mtm)?;
+    if IMPORT.with(|i| i.borrow().is_some()) {
+        return Err("正在导入，请稍候".into());
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Off the main thread: the Keychain prompt waits for the person.
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::chrome_import::read());
+    });
+    let generation = generation.unwrap_or_else(|| Arc::new(std::sync::atomic::AtomicU64::new(0)));
+    IMPORT.with(|i| *i.borrow_mut() = Some((key.to_owned(), generation, rx)));
+    Ok(json!({ "started": true }))
+}
+
 impl ChromiumView {
     pub fn load(&self, url: &str, generation: u64) {
         self.generation
@@ -354,16 +372,7 @@ impl ChromiumView {
                 );
             }
             "browser.importChromeCookies" => {
-                if IMPORT.with(|i| i.borrow().is_some()) {
-                    return Err("正在导入，请稍候".into());
-                }
-                let (tx, rx) = std::sync::mpsc::channel();
-                // Off the main thread: the Keychain prompt waits for the person.
-                std::thread::spawn(move || {
-                    let _ = tx.send(crate::chrome_import::read());
-                });
-                IMPORT.with(|i| *i.borrow_mut() = Some((self.key.clone(), self.generation.clone(), rx)));
-                return Ok(json!({ "started": true }));
+                return import_chrome_cookies(MainThreadMarker::new().ok_or("main thread only")?, &self.key, Some(self.generation.clone()));
             }
             "browser.revealDownload" => {
                 let id = args

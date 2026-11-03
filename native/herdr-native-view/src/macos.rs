@@ -8,9 +8,12 @@
 use crate::{Event, Kind, Rect, Source, Spec, Trust};
 use block2::RcBlock;
 use objc2::rc::{Retained, Weak};
-use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
+use objc2::encode::{Encoding, RefEncode};
+use objc2::runtime::{AnyClass, AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSEvent, NSEventMask, NSResponder, NSView, NSWindowOrderingMode};
+use objc2_app_kit::{
+    NSAutoresizingMaskOptions, NSEvent, NSEventMask, NSResponder, NSView, NSWindowOrderingMode,
+};
 use objc2_av_foundation::{AVPlayer, AVPlayerItemStatus};
 use objc2_av_kit::AVPlayerView;
 use objc2_core_media::CMTime;
@@ -97,7 +100,11 @@ struct Entry {
     spec_json: Value,
     spec: Spec,
     generation: u64,
+    /// The container that is moved and hidden (a `HoleHost`); `inner` is the
+    /// renderer's own view inside it, which takes the keyboard.
     view: Retained<NSView>,
+    host: Retained<HoleHost>,
+    inner: Retained<NSView>,
     renderer: Renderer,
     /// GPUI's view in the window that owns this one, and the content view both live in.
     gpui: Weak<NSView>,
@@ -155,9 +162,25 @@ pub fn ensure(key: &str, gpui_view: *mut c_void, props: &Value) -> Result<u64, S
     let container = unsafe { gpui.superview() }.ok_or("GPUI view is not in a window")?;
     let generation = 1;
     let zero = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
-    let (view, renderer) = make(mtm, key, &spec, zero, generation, &container)?;
+    // The host goes into the window first, so a Chromium browser can be created inside it.
+    let host = HoleHost::new(mtm, zero);
+    let view: Retained<NSView> = Retained::into_super(host.clone());
     view.setHidden(true);
     container.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Above, Some(&gpui));
+    let (inner, renderer) = match make(mtm, key, &spec, zero, generation, &view) {
+        Ok(r) => r,
+        Err(e) => {
+            view.removeFromSuperview();
+            return Err(e);
+        }
+    };
+    if unsafe { inner.superview() }.is_none_or(|s| !std::ptr::eq(Retained::as_ptr(&s), Retained::as_ptr(&view))) {
+        view.addSubview(&inner);
+    }
+    inner.setFrame(view.bounds());
+    inner.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
     install_focus_monitor(mtm);
     let entry = Entry {
         kind: spec.kind,
@@ -165,6 +188,8 @@ pub fn ensure(key: &str, gpui_view: *mut c_void, props: &Value) -> Result<u64, S
         spec: spec.clone(),
         generation,
         view,
+        host,
+        inner,
         renderer,
         gpui: Weak::from_retained(&gpui),
         container: Weak::from_retained(&container),
@@ -194,16 +219,16 @@ fn make(
     spec: &Spec,
     frame: NSRect,
     generation: u64,
-    container: &NSView,
+    parent: &NSView,
 ) -> Result<(Retained<NSView>, Renderer), String> {
-    let _ = container;
+    let _ = parent;
     if spec.kind == Kind::Chromium {
         #[cfg(feature = "chromium")]
         {
             let Source::Url(url) = &spec.source else {
                 return Err("Chromium views take a `url`".into());
             };
-            let (view, c) = crate::chromium::create(mtm, key, container, url, generation)?;
+            let (view, c) = crate::chromium::create(mtm, key, parent, url, generation)?;
             return Ok((view, Renderer::Chromium(c)));
         }
         #[cfg(not(feature = "chromium"))]
@@ -535,9 +560,14 @@ pub fn frame_end(
 /// Runs one whitelisted action. Unknown actions are refused, never guessed.
 pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
     let mtm = MainThreadMarker::new().ok_or("main thread only")?;
-    let kind = VIEWS
-        .with(|v| v.borrow().get(key).map(|e| e.kind))
-        .ok_or_else(|| format!("no native view `{key}`"))?;
+    let kind = VIEWS.with(|v| v.borrow().get(key).map(|e| e.kind));
+    // Importing Chrome's cookies doesn't need a page: the browser panel offers it
+    // before the first address too.
+    #[cfg(feature = "chromium")]
+    if kind.is_none() && action == "browser.importChromeCookies" {
+        return crate::chromium::import_chrome_cookies(mtm, key, None);
+    }
+    let kind = kind.ok_or_else(|| format!("no native view `{key}`"))?;
     if !kind.allows(action) {
         return Err(format!(
             "`{action}` is not an action of {} views",
@@ -567,7 +597,17 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
             });
             return Ok(Value::Null);
         }
-        "navigate" => {}
+        // Cut-outs where the mod draws over the view (a menu card): the view
+        // isn't drawn there and clicks there go to Herdr.
+        "setHoles" => {
+            let holes = parse_holes(args)?;
+            VIEWS.with(|v| {
+                if let Some(e) = v.borrow().get(key) {
+                    e.host.set_holes(holes);
+                }
+            });
+            return Ok(Value::Null);
+        }
         _ => {}
     }
     let mut reload: Option<Value> = None;
@@ -590,7 +630,7 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
                 #[cfg(feature = "chromium")]
                 ("focus", Renderer::Chromium(c)) => {
                     if let Some(w) = e.view.window() {
-                        w.makeFirstResponder(Some(&e.view));
+                        w.makeFirstResponder(Some(&e.inner));
                     }
                     c.action("focus", args)
                 }
@@ -598,7 +638,7 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
                 (a, Renderer::Chromium(c)) if a.starts_with("browser.") => c.action(a, args),
                 ("focus", _) => {
                     let w = e.view.window().ok_or("not in a window")?;
-                    w.makeFirstResponder(Some(&e.view));
+                    w.makeFirstResponder(Some(&e.inner));
                     Ok(Value::Null)
                 }
                 ("blur", _) => {
@@ -768,9 +808,40 @@ fn entry_state(e: &Entry, r: &Renderer) -> Value {
         "shown": e.shown,
         "suppressed": e.suppressed,
         "wantedHidden": e.wanted_hidden,
+        "holes": e.host.ivars().holes.borrow().len(),
+        "holeClicksReachHerdr": hole_clicks_reach_herdr(e),
+        "masked": layer_masked(&e.view),
         "firstResponderInside": first,
         "content": content,
     })
+}
+
+fn layer_masked(view: &NSView) -> bool {
+    let layer: Option<Retained<AnyObject>> = unsafe { msg_send![view, layer] };
+    layer.is_some_and(|l| {
+        let mask: Option<Retained<AnyObject>> = unsafe { msg_send![&*l, mask] };
+        mask.is_some()
+    })
+}
+
+/// For the self-check: a click at each hole's centre, hit-tested by the window
+/// like a real one, lands outside this view (on Herdr). `None` without holes.
+fn hole_clicks_reach_herdr(e: &Entry) -> Option<bool> {
+    let holes = e.host.ivars().holes.borrow().clone();
+    if holes.is_empty() || e.view.isHidden() {
+        return None;
+    }
+    let window = e.view.window()?;
+    let content = window.contentView()?;
+    let frame_view = unsafe { content.superview() };
+    let width = e.view.bounds().size.width;
+    Some(holes.iter().all(|h| {
+        let r = h.rect(width);
+        let c = NSPoint::new(r.origin.x + r.size.width / 2.0, r.origin.y + r.size.height / 2.0);
+        let in_window = e.view.convertPoint_toView(c, None);
+        let p = match &frame_view { Some(f) => f.convertPoint_fromView(in_window, None), None => in_window };
+        content.hitTest(p).is_none_or(|v| !v.isDescendantOf(&e.view))
+    }))
 }
 
 fn responder_inside(fr: &NSResponder, root: &NSView) -> bool {
@@ -846,10 +917,11 @@ fn install_focus_monitor(_mtm: MainThreadMarker) {
         if let Some(window) = event.window(_mtm) {
             let p = event.locationInWindow();
             let mut inside = false;
+            let mut clicked: Vec<(String, u64)> = Vec::new();
             let mut gpui_for_window: Option<Retained<NSView>> = None;
             VIEWS.with(|v| {
                 if let Ok(v) = v.try_borrow() {
-                    for e in v.values() {
+                    for (k, e) in v.iter() {
                         if e.view
                             .window()
                             .is_some_and(|w| std::ptr::eq(Retained::as_ptr(&w), &*window))
@@ -864,7 +936,14 @@ fn install_focus_monitor(_mtm: MainThreadMarker) {
                                     && p.x < f.origin.x + f.size.width
                                     && p.y < f.origin.y + f.size.height
                                 {
+                                    let local = e.view.convertPoint_fromView(p, None);
+                                    if e.host.in_hole(local) {
+                                        continue;
+                                    }
                                     inside = true;
+                                    if !e.host.ivars().holes.borrow().is_empty() {
+                                        clicked.push((k.clone(), e.generation));
+                                    }
                                 }
                             }
                         }
@@ -884,6 +963,10 @@ fn install_focus_monitor(_mtm: MainThreadMarker) {
                 })
             {
                 window.makeFirstResponder(Some(&g));
+            }
+            // Outside the card, on the page: the mod closes its menu, like a popover.
+            for (k, g) in clicked {
+                emit(&k, g, "view.click", json!({}));
             }
         }
         ev.as_ptr()
@@ -986,5 +1069,193 @@ impl WebDelegate {
     fn report(&self, name: &'static str, data: Value) {
         let i = self.ivars();
         emit(&i.key, i.generation.get(), name, data);
+    }
+}
+
+/// One cut-out, in the view's top-left coordinates. `right` anchors it to the
+/// right edge, so it stays put when the view changes width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Hole {
+    x: Option<f64>,
+    right: Option<f64>,
+    y: f64,
+    w: f64,
+    h: f64,
+    radius: f64,
+}
+
+impl Hole {
+    fn rect(&self, width: f64) -> NSRect {
+        let x = match (self.x, self.right) {
+            (Some(x), _) => x,
+            (None, Some(r)) => width - r - self.w,
+            (None, None) => 0.0,
+        };
+        NSRect::new(NSPoint::new(x, self.y), NSSize::new(self.w, self.h))
+    }
+}
+
+/// `{ holes: [{ x | right, y, w, h, radius? }] }`, at most 8; `[]` clears.
+pub(crate) fn parse_holes(args: &Value) -> Result<Vec<Hole>, String> {
+    let list = args.get("holes").and_then(Value::as_array).ok_or("setHoles needs { holes: [...] }")?;
+    if list.len() > 8 {
+        return Err("at most 8 holes".into());
+    }
+    let num = |h: &Value, k: &str| -> Result<Option<f64>, String> {
+        match h.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_f64()
+                .filter(|n| n.is_finite() && *n >= 0.0 && *n < 100_000.0)
+                .map(Some)
+                .ok_or_else(|| format!("hole `{k}` must be a number ≥ 0")),
+        }
+    };
+    list.iter()
+        .map(|h| {
+            Ok(Hole {
+                x: num(h, "x")?,
+                right: num(h, "right")?,
+                y: num(h, "y")?.unwrap_or(0.0),
+                w: num(h, "w")?.ok_or("hole needs `w`")?,
+                h: num(h, "h")?.ok_or("hole needs `h`")?,
+                radius: num(h, "radius")?.unwrap_or(0.0),
+            })
+        })
+        .collect()
+}
+
+#[repr(C)]
+pub struct CGPath {
+    _private: [u8; 0],
+}
+
+// SAFETY: CGPathRef is a pointer to the opaque struct CGPath.
+unsafe impl RefEncode for CGPath {
+    const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGPath", &[]));
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGPathCreateMutable() -> *mut CGPath;
+    fn CGPathAddRect(path: *mut CGPath, m: *const c_void, rect: NSRect);
+    fn CGPathAddRoundedRect(path: *mut CGPath, m: *const c_void, rect: NSRect, w: f64, h: f64);
+    fn CGPathRelease(path: *mut CGPath);
+}
+
+pub struct HostIvars {
+    holes: RefCell<Vec<Hole>>,
+}
+
+define_class!(
+    /// Holds one native view. Where the mod draws a card over it, a hole lets
+    /// Herdr's drawing (below) show and receive the clicks.
+    // SAFETY: NSView subclass; overrides keep NSView's contracts (super is called).
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = HostIvars]
+    pub struct HoleHost;
+
+    unsafe impl NSObjectProtocol for HoleHost {}
+
+    impl HoleHost {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(hitTest:))]
+        fn hit_test(&self, point: NSPoint) -> *mut NSView {
+            // `point` is in the superview's coordinates.
+            if let Some(sup) = unsafe { self.superview() } {
+                let local = self.convertPoint_fromView(point, Some(&sup));
+                if self.in_hole(local) {
+                    return std::ptr::null_mut();
+                }
+            }
+            unsafe { msg_send![super(self), hitTest: point] }
+        }
+
+        #[unsafe(method(setFrameSize:))]
+        fn set_frame_size(&self, size: NSSize) {
+            let _: () = unsafe { msg_send![super(self), setFrameSize: size] };
+            self.update_mask();
+        }
+    }
+);
+
+impl HoleHost {
+    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(HostIvars { holes: RefCell::new(Vec::new()) });
+        let this: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        this.setWantsLayer(true);
+        this
+    }
+
+    fn in_hole(&self, p: NSPoint) -> bool {
+        let width = self.bounds().size.width;
+        self.ivars().holes.borrow().iter().any(|h| {
+            let r = h.rect(width);
+            p.x >= r.origin.x && p.y >= r.origin.y && p.x < r.origin.x + r.size.width && p.y < r.origin.y + r.size.height
+        })
+    }
+
+    fn set_holes(&self, holes: Vec<Hole>) {
+        if *self.ivars().holes.borrow() == holes {
+            return;
+        }
+        *self.ivars().holes.borrow_mut() = holes;
+        self.update_mask();
+    }
+
+    /// A shape mask: the whole view minus the holes (even-odd fill).
+    fn update_mask(&self) {
+        let holes = self.ivars().holes.borrow();
+        let layer: Option<Retained<AnyObject>> = unsafe { msg_send![self, layer] };
+        let Some(layer) = layer else { return };
+        if holes.is_empty() {
+            let none: Option<&AnyObject> = None;
+            let _: () = unsafe { msg_send![&*layer, setMask: none] };
+            return;
+        }
+        let Some(cls) = AnyClass::get(c"CAShapeLayer") else { return };
+        let b = self.bounds();
+        // The view is flipped (top-left); its layer may or may not be.
+        let layer_flipped: bool = unsafe { msg_send![&*layer, isGeometryFlipped] };
+        unsafe {
+            let path = CGPathCreateMutable();
+            CGPathAddRect(path, std::ptr::null(), b);
+            for h in holes.iter() {
+                let mut r = h.rect(b.size.width);
+                if !layer_flipped {
+                    r.origin.y = b.size.height - r.origin.y - r.size.height;
+                }
+                let rad = h.radius.min(r.size.width / 2.0).min(r.size.height / 2.0);
+                CGPathAddRoundedRect(path, std::ptr::null(), r, rad, rad);
+            }
+            let shape: Retained<AnyObject> = msg_send![cls, layer];
+            let _: () = msg_send![&*shape, setFrame: b];
+            let _: () = msg_send![&*shape, setPath: path.cast_const()];
+            let rule = NSString::from_str("even-odd");
+            let _: () = msg_send![&*shape, setFillRule: &*rule];
+            let _: () = msg_send![&*layer, setMask: &*shape];
+            CGPathRelease(path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn holes_parse_and_follow_the_right_edge() {
+        let h = parse_holes(&json!({ "holes": [{ "right": 10, "y": 6, "w": 300, "h": 200, "radius": 12 }] })).unwrap();
+        let r = h[0].rect(800.0);
+        assert_eq!((r.origin.x, r.origin.y, r.size.width, r.size.height), (490.0, 6.0, 300.0, 200.0));
+        assert!(parse_holes(&json!({ "holes": [] })).unwrap().is_empty());
+        assert!(parse_holes(&json!({ "holes": [{ "w": -1, "h": 2 }] })).is_err());
+        assert!(parse_holes(&json!({ "holes": [{ "w": 1 }] })).is_err());
+        assert!(parse_holes(&json!({})).is_err());
     }
 }
