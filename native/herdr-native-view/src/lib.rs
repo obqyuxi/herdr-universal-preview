@@ -109,12 +109,13 @@ impl Kind {
     /// The only actions a mod may perform on a view of this kind. No action
     /// runs a shell, evaluates script text or reads arbitrary files.
     pub fn actions(self) -> &'static [&'static str] {
-        const COMMON: [&str; 5] = ["focus", "blur", "setVisible", "state", "dispose"];
+        const COMMON: [&str; 6] = ["focus", "blur", "setVisible", "setHoles", "state", "dispose"];
         match self {
             Kind::Web => &[
                 "focus",
                 "blur",
                 "setVisible",
+                "setHoles",
                 "state",
                 "dispose",
                 "browser.navigate",
@@ -127,6 +128,7 @@ impl Kind {
                 "focus",
                 "blur",
                 "setVisible",
+                "setHoles",
                 "state",
                 "dispose",
                 "pdf.goToPage",
@@ -140,6 +142,7 @@ impl Kind {
                 "focus",
                 "blur",
                 "setVisible",
+                "setHoles",
                 "state",
                 "dispose",
                 "media.play",
@@ -153,6 +156,7 @@ impl Kind {
                 "focus",
                 "blur",
                 "setVisible",
+                "setHoles",
                 "state",
                 "dispose",
                 "browser.navigate",
