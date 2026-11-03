@@ -5,7 +5,7 @@
 //
 // The ⋯ menu and its pages are small cards over the page: the host cuts a hole
 // in the page where a card is (`setHoles`), so the page stays visible around it.
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import * as herdr from "herdr";
 
@@ -20,17 +20,22 @@ const ENGINES = [
   { id: "duckduckgo", name: "DuckDuckGo", url: "https://duckduckgo.com/?q=%s" },
 ];
 // Cards: where they sit over the page (right/top) and how big they are. The hole
-// the host cuts uses the same numbers, so they must match what render draws.
-const ROW = 34, SEP = 9, PAD = 6, ZOOM_ROW = 42;
+// the host cuts uses the same numbers, so every height below is the sum of the
+// fixed rows render draws (Herdr's own menu metrics: 32px rows, 13px text).
+const ROW = 32, SEP = 9, PAD = 5, ZOOM_ROW = 40, HEADER = 44, LINE = 20, BUTTONS = 30, BODY_PAD = 16;
+const textCard = (lines) => HEADER + lines * LINE + (lines - 1) * 4 + 14 + BUTTONS + BODY_PAD;
+const HISTORY_ROW = 46, DOWNLOAD_ROW = 42, LIST_MAX = 8;
+const listCard = (rows, rowH) => HEADER + Math.max(1, Math.min(rows, LIST_MAX)) * rowH + PAD;
 const CARDS = {
-  menu: { w: 300, h: PAD * 2 + 7 * ROW + ZOOM_ROW + 3 * SEP },
-  downloads: { w: 340, h: 300 },
-  history: { w: 360, h: 440 },
-  import: { w: 340, h: 300 },
-  clear: { w: 300, h: 168 },
-  settings: { w: 300, h: 52 + 26 + ENGINES.length * ROW + PAD * 2 },
+  menu: { w: 280, h: PAD * 2 + 7 * ROW + ZOOM_ROW + 3 * SEP },
+  downloads: { w: 340, h: listCard(1, DOWNLOAD_ROW) },
+  history: { w: 360, h: listCard(1, HISTORY_ROW) },
+  import: { w: 340, h: textCard(3) },
+  clear: { w: 300, h: textCard(1) },
+  settings: { w: 280, h: HEADER + 24 + ENGINES.length * ROW + PAD },
 };
-const CARD_RIGHT = 10, CARD_TOP = 6, CARD_RADIUS = 12;
+const CARD_RIGHT = 10, CARD_TOP = 6, CARD_RADIUS = 10;
+const ICONS = "mods/browser/icons";
 
 const hasNative = () => typeof herdr.nativeView?.new === "function";
 const engine = () => (herdr.nativeViewCapabilities?.().kinds ?? []).some(k => k.kind === "chromium") ? "chromium" : "web";
@@ -95,6 +100,21 @@ export default class Browser extends View {
     this.findInput.on("submit", (e, cx) => this.runFind(true, !e?.shift, cx));
     if (!hasNative()) return;
     this.engine = engine();
+    // Key commands (keys.json `browser.<command>`): menu, address, find, home,
+    // and `panel:<card>` to open one card directly.
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = String(await herdr.nextCommand());
+        const [name, arg] = c.split(":");
+        if (name === "menu") this.setPanel(CARDS[this.panel] ? null : "menu");
+        if (name === "panel" && (CARDS[arg] || arg === "home")) { if (arg === "import") this.importState = null; this.setPanel(arg); }
+        if (name === "close") this.setPanel(null);
+        if (name === "address") this.input.focus();
+        if (name === "find" && this.start) { this.setPanel(null); this.finding = true; this.findInput.focus(); }
+        if (name === "home" && this.start) this.setPanel(this.panel === "home" ? null : "home");
+        cx.notify();
+      }
+    });
     cx.spawn(async (cx) => {
       for (;;) {
         const e = JSON.parse(await herdr.nextNativeViewEvent());
@@ -122,7 +142,7 @@ export default class Browser extends View {
     if (event === "web.processTerminated") this.error = "页面进程意外退出，请点刷新";
     if ("canGoBack" in d) { this.canBack = d.canGoBack; this.canForward = d.canGoForward; }
     if (event === "find.result") this.find = d;
-    if (event === "download.start") this.downloads.set(d.id, { id: d.id, name: d.name, percent: 0, complete: false });
+    if (event === "download.start") { this.downloads.set(d.id, { id: d.id, name: d.name, percent: 0, complete: false }); if (this.panel === "downloads") this.setPanel("downloads"); }
     if (event === "download.update") this.downloads.set(d.id, { ...(this.downloads.get(d.id) ?? {}), ...d });
     if (event === "import.done") this.importState = { done: d };
     if (event === "import.error") this.importState = { error: d.message || "导入失败" };
@@ -170,9 +190,23 @@ export default class Browser extends View {
     this.panel = panel;
     // The frequent-sites page covers the whole page area; cards only their own spot.
     this.call("setVisible", { visible: panel !== "home" });
-    const c = CARDS[panel];
+    const c = this.cardSize(panel);
     this.call("setHoles", { holes: c ? [{ right: CARD_RIGHT, y: CARD_TOP, w: c.w, h: c.h, radius: CARD_RADIUS }] : [] });
     if (panel === "menu") this.zoom = this.call("state")?.content?.zoomLevel ?? this.zoom;
+  }
+
+  historyRows() {
+    const seen = new Set();
+    return this.history.filter((h) => !seen.has(h.url) && seen.add(h.url)).slice(0, 100);
+  }
+
+  // History and downloads grow with their lists (up to LIST_MAX rows, then scroll).
+  cardSize(name) {
+    const c = CARDS[name];
+    if (!c) return null;
+    if (name === "history") return { w: c.w, h: listCard(this.historyRows().length, HISTORY_ROW) };
+    if (name === "downloads") return { w: c.w, h: listCard(this.downloads.size, DOWNLOAD_ROW) };
+    return c;
   }
 
   runFind(next, forward, cx) {
@@ -191,51 +225,67 @@ export default class Browser extends View {
 
   // ---- pieces ----
 
-  icon(t, id, label, enabled, onClick, w = 30, h = 30) {
-    return div().id(id).w(w).h(h).flex_none().flex().items_center().justify_center().rounded(h / 2).text_size(15)
-      .text_color(enabled ? t.foreground : t.dim)
+  glyph(name, size, color) {
+    return svg(`${ICONS}/${name}.svg`).size(size).flex_none().text_color(color);
+  }
+
+  // A round icon button; disabled ones stay in place, dimmed.
+  icon(t, id, name, enabled, onClick, size = 30, iconSize = 16) {
+    return div().id(id).w(size).h(size).flex_none().flex().items_center().justify_center().rounded(size / 2)
       .when(enabled, el => el.cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => { onClick(cx); cx.notify(); }))
-      .child(label);
+      .child(this.glyph(name, iconSize, enabled ? t.foreground : t.dim));
   }
 
   item(t, id, label, enabled, onClick, right) {
-    return h_flex().id(id).h(ROW).flex_none().px(12).gap(8).items_center().rounded(8).text_size(14)
+    return h_flex().id(id).h(ROW).flex_none().px(10).gap(8).items_center().rounded(7).text_size(13)
       .text_color(enabled ? t.foreground : t.dim)
       .when(enabled, el => el.cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => { onClick(cx); cx.notify(); }))
       .child(div().flex_1().min_w(0).truncate().child(label))
-      .when(Boolean(right), el => el.child(div().text_color(t.dim).text_size(12).child(right)));
+      .when(right != null, el => el.child(right));
   }
 
   sep(t) {
-    return div().h(SEP).flex_none().flex().items_center().px(12).child(div().w_full().h(1).bg(t.border));
+    return div().h(SEP).flex_none().flex().items_center().px(10).child(div().w_full().h(1).bg(t.border));
   }
 
   card(t, name, body) {
-    const c = CARDS[name];
+    const c = this.cardSize(name);
     return v_flex().id(`card-${name}`).absolute().top(CARD_TOP).right(CARD_RIGHT).w(c.w).h(c.h)
-      .overflow_hidden().rounded(CARD_RADIUS).border_1().border_color(t.border).bg(t.background).text_color(t.foreground)
+      .overflow_hidden().rounded(CARD_RADIUS).border_1().border_color(t.border).bg(t.popover ?? t.background).text_color(t.foreground)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .child(body);
   }
 
   cardHeader(t, title) {
-    return h_flex().h(44).flex_none().px(8).gap(4).items_center()
-      .child(this.icon(t, `back-${title}`, "‹", true, () => this.setPanel("menu"), 28, 28))
-      .child(div().flex_1().text_size(14).font_semibold().child(title))
-      .child(this.icon(t, `close-${title}`, "✕", true, () => this.setPanel(null), 28, 28));
+    return h_flex().h(HEADER).flex_none().pl(6).pr(8).gap(2).items_center()
+      .child(this.icon(t, `back-${title}`, "chevron-left", true, () => this.setPanel("menu"), 28, 16))
+      .child(div().flex_1().text_size(13).font_semibold().child(title))
+      .child(this.icon(t, `close-${title}`, "x", true, () => this.setPanel(null), 28, 15));
+  }
+
+  // Short lines, one sentence each: GPUI wraps CJK anywhere, so a long line
+  // could start with "，" or leave a lone "。".
+  lines(t, list) {
+    return v_flex().gap(4).children(list.map((l) => div().h(LINE).text_size(13).text_color(t.muted ?? t.foreground).truncate().child(l)));
+  }
+
+  textCardBody(t, list, buttons) {
+    return v_flex().px(BODY_PAD).child(this.lines(t, list)).child(h_flex().gap(8).pt(14).child(buttons[0]).when(Boolean(buttons[1]), el => el.child(buttons[1])));
   }
 
   menu(t) {
     const page = Boolean(this.start);
     const chromium = this.engine === "chromium";
     const z = chromium && page;
-    const zoom = h_flex().h(ZOOM_ROW).flex_none().px(12).gap(8).items_center().text_size(14)
+    const zoom = h_flex().h(ZOOM_ROW).flex_none().px(10).gap(6).items_center().text_size(13)
+      .text_color(z ? t.foreground : t.dim)
       .child(div().flex_1().child("缩放"))
-      .child(h_flex().h(30).items_center().rounded(8).border_1().border_color(t.border)
-        .child(this.icon(t, "z-out", "−", z, () => { this.zoom = this.call("browser.zoomOut")?.zoomLevel ?? this.zoom; }, 32, 28))
-        .child(div().w(54).text_center().text_size(13).text_color(z ? t.foreground : t.dim).child(`${zoomPercent(this.zoom)}%`))
-        .child(this.icon(t, "z-in", "+", z, () => { this.zoom = this.call("browser.zoomIn")?.zoomLevel ?? this.zoom; }, 32, 28)))
-      .child(this.icon(t, "z-reset", "↺", z && this.zoom !== 0, () => { this.zoom = this.call("browser.zoomReset")?.zoomLevel ?? 0; }, 28, 28));
+      .child(h_flex().h(28).items_center().rounded(7).border_1().border_color(t.border)
+        .child(this.icon(t, "z-out", "minus", z, () => { this.zoom = this.call("browser.zoomOut")?.zoomLevel ?? this.zoom; }, 28, 14))
+        .child(div().w(48).text_center().text_size(12).child(`${zoomPercent(this.zoom)}%`))
+        .child(this.icon(t, "z-in", "plus", z, () => { this.zoom = this.call("browser.zoomIn")?.zoomLevel ?? this.zoom; }, 28, 14)))
+      .child(this.icon(t, "z-reset", "rotate-ccw", z && this.zoom !== 0, () => { this.zoom = this.call("browser.zoomReset")?.zoomLevel ?? 0; }, 28, 14));
+    const count = (n) => n ? div().text_size(12).text_color(t.dim).child(String(n)) : null;
     return v_flex().p(PAD)
       .child(this.item(t, "m-find", "在页面中查找", z, () => { this.setPanel(null); this.finding = true; this.findInput.focus(); }))
       .child(this.item(t, "m-print", "打印", z, () => { this.setPanel(null); this.call("browser.print"); }))
@@ -243,84 +293,88 @@ export default class Browser extends View {
       .child(zoom)
       .child(this.sep(t))
       .child(this.item(t, "m-import", "导入 Cookie…", chromium, () => { this.importState = null; this.setPanel("import"); }))
-      .child(this.item(t, "m-downloads", "下载", true, () => this.setPanel("downloads"), this.downloads.size ? String(this.downloads.size) : ""))
+      .child(this.item(t, "m-downloads", "下载", true, () => this.setPanel("downloads"), count(this.downloads.size)))
       .child(this.item(t, "m-history", "历史记录", true, () => this.setPanel("history")))
-      .child(this.item(t, "m-clear", "清除浏览数据", true, () => this.setPanel("clear")))
+      .child(this.item(t, "m-clear", "清除浏览数据…", true, () => this.setPanel("clear")))
       .child(this.sep(t))
       .child(this.item(t, "m-settings", "浏览器设置", true, () => this.setPanel("settings")));
   }
 
   button(t, id, label, primary, onClick) {
-    return div().id(id).px(14).h(30).flex().items_center().rounded(8).cursor_pointer().text_size(13)
-      .bg(primary ? t.accent : t.raised).text_color(primary ? (t.accent_foreground ?? t.background) : t.foreground)
-      .hover(x => x.opacity(0.85)).on_click((_e, cx) => { onClick(); cx.notify(); }).child(label);
+    return div().id(id).px(14).h(BUTTONS).flex().items_center().rounded(7).cursor_pointer().text_size(13)
+      .when(primary, el => el.bg(t.accent).text_color(t.solid_foreground ?? "#ffffff"))
+      .when(!primary, el => el.border_1().border_color(t.border).text_color(t.foreground))
+      .hover(x => x.opacity(0.88)).on_click((_e, cx) => { onClick(); cx.notify(); }).child(label);
   }
 
   importPanel(t) {
     const s = this.importState;
-    const para = (text) => div().text_size(13).text_color(t.muted ?? t.foreground).child(text);
     let body;
     if (!s) {
-      body = v_flex().gap(8)
-        .child(para("把本机 Google Chrome 的 Cookie 复制到这个浏览器，大多数网站就不用重新登录。"))
-        .child(para("macOS 会询问能否读取钥匙串里的 \"Chrome Safe Storage\"，点\"允许\"即可。只在本机复制，不导入密码，不改动 Chrome。"))
-        .child(h_flex().gap(8).pt(6)
-          .child(this.button(t, "imp-go", "导入", true, () => this.startImport()))
-          .child(this.button(t, "imp-cancel", "取消", false, () => this.setPanel(null))));
+      body = this.textCardBody(t, [
+        "复制本机 Chrome 的 Cookie 到这个浏览器。",
+        "macOS 会请求钥匙串授权，点“允许”即可。",
+        "只在本机复制，不导入密码，不改动 Chrome。",
+      ], [this.button(t, "imp-go", "导入", true, () => this.startImport()), this.button(t, "imp-cancel", "取消", false, () => this.setPanel(null))]);
     } else if (s.running) {
-      body = para("正在读取 Chrome 的 Cookie……");
+      body = v_flex().px(BODY_PAD).child(this.lines(t, ["正在读取 Chrome 的 Cookie……"]));
     } else if (s.error) {
-      body = v_flex().gap(8).child(div().text_size(13).text_color(t.blocked).child(`没有导入：${s.error}`))
-        .child(h_flex().gap(8).pt(6).child(this.button(t, "imp-retry", "重试", true, () => this.startImport()))
+      body = v_flex().px(BODY_PAD).gap(4)
+        .child(div().text_size(13).text_color(t.blocked).child("没有导入"))
+        .child(div().text_size(12).text_color(t.dim).truncate().child(s.error))
+        .child(h_flex().gap(8).pt(10).child(this.button(t, "imp-retry", "重试", true, () => this.startImport()))
           .child(this.button(t, "imp-close", "关闭", false, () => this.setPanel(null))));
     } else {
       const d = s.done;
-      body = v_flex().gap(8)
-        .child(para(`已导入 ${d.sites} 个网站的 ${d.cookies} 条 Cookie（来自 Chrome 资料「${d.profile}」）。`))
-        .child(h_flex().gap(8).pt(6)
-          .when(Boolean(this.start), el => el.child(this.button(t, "imp-reload", "刷新页面", true, () => { this.setPanel(null); this.call("browser.reload"); })))
-          .child(this.button(t, "imp-done", "完成", !this.start, () => this.setPanel(null))));
+      body = this.textCardBody(t, [
+        `已导入 ${d.sites} 个网站的 ${d.cookies} 条 Cookie。`,
+        `来自 Chrome 资料「${d.profile}」。`,
+        "已登录的网站刷新后即可使用。",
+      ], this.start
+        ? [this.button(t, "imp-reload", "刷新页面", true, () => { this.setPanel(null); this.call("browser.reload"); }), this.button(t, "imp-done", "完成", false, () => this.setPanel(null))]
+        : [this.button(t, "imp-done", "完成", true, () => this.setPanel(null))]);
     }
-    return v_flex().child(this.cardHeader(t, "导入 Cookie")).child(v_flex().px(16).pb(12).child(body));
+    return v_flex().child(this.cardHeader(t, "导入 Cookie")).child(body);
   }
 
   clearPanel(t) {
     return v_flex().child(this.cardHeader(t, "清除浏览数据"))
-      .child(v_flex().px(16).gap(10)
-        .child(div().text_size(13).text_color(t.muted ?? t.foreground).child("删除这个浏览器的登录状态、缓存和历史记录。"))
-        .child(h_flex().gap(8).pt(4)
-          .child(this.button(t, "clear-go", "清除", true, () => {
-            if (this.engine === "chromium") this.call("browser.clearData");
-            this.history = []; localStorage.removeItem("browser.history");
-            this.setPanel(null);
-          }))
-          .child(this.button(t, "clear-cancel", "取消", false, () => this.setPanel(null)))));
+      .child(this.textCardBody(t, ["删除登录状态、缓存和历史记录。"], [
+        this.button(t, "clear-go", "清除", true, () => {
+          if (this.engine === "chromium") this.call("browser.clearData");
+          this.history = []; localStorage.removeItem("browser.history");
+          this.setPanel(null);
+        }),
+        this.button(t, "clear-cancel", "取消", false, () => this.setPanel(null)),
+      ]));
   }
 
   settingsPanel(t) {
     return v_flex().child(this.cardHeader(t, "浏览器设置"))
-      .child(div().h(26).px(16).text_size(12).text_color(t.dim).child("搜索引擎"))
+      .child(div().h(24).px(BODY_PAD).text_size(12).text_color(t.dim).child("地址栏搜索使用"))
       .child(v_flex().px(PAD).children(ENGINES.map((e) => this.item(t, `se-${e.id}`, e.name, true, () => {
         this.searchEngine = e.id; localStorage.setItem("browser.searchEngine", e.id);
-      }, e.id === this.searchEngine ? "✓" : ""))));
+      }, e.id === this.searchEngine ? this.glyph("check", 15, t.accent) : null))));
   }
 
   downloadsPanel(t) {
     const list = [...this.downloads.values()].reverse();
     return v_flex().size_full().child(this.cardHeader(t, "下载"))
       .child(v_flex().id("dl-list").flex_1().min_h(0).px(PAD).pb(PAD).overflow_y_scrollbar().text_size(13)
-        .when(!list.length, el => el.child(div().px(10).py(6).text_color(t.dim).child("还没有下载")))
-        .children(list.map((d) => h_flex().id(`dl-${d.id}`).h(ROW).px(10).gap(8).items_center()
-          .child(div().flex_1().min_w(0).truncate().child(d.name || "下载"))
-          .child(div().text_size(12).text_color(t.dim).child(d.canceled ? "已取消" : d.complete ? "完成" : `${Math.max(0, d.percent ?? 0)}%`))
-          .when(Boolean(d.complete), el => el.child(this.icon(t, `dl-show-${d.id}`, "在访达中显示", true, () => this.call("browser.revealDownload", { id: d.id }), 96, 26))))));
+        .when(!list.length, el => el.child(div().h(DOWNLOAD_ROW).px(10).flex().items_center().text_color(t.dim).child("还没有下载")))
+        .children(list.map((d) => h_flex().id(`dl-${d.id}`).h(DOWNLOAD_ROW).flex_none().px(10).gap(8).items_center().rounded(7)
+          .child(v_flex().flex_1().min_w(0)
+            .child(div().truncate().child(d.name || "下载"))
+            .child(div().text_size(11).text_color(t.dim).child(d.canceled ? "已取消" : d.complete ? "已完成" : `${Math.max(0, d.percent ?? 0)}%`)))
+          .when(Boolean(d.complete), el => el.child(this.icon(t, `dl-show-${d.id}`, "folder-open", true, () => this.call("browser.revealDownload", { id: d.id }), 28, 15))))));
   }
 
   historyPanel(t) {
+    const rows = this.historyRows();  // one row per page, newest first
     return v_flex().size_full().child(this.cardHeader(t, "历史记录"))
       .child(v_flex().id("history-list").flex_1().min_h(0).px(PAD).pb(PAD).overflow_y_scrollbar().text_size(13)
-        .when(!this.history.length, el => el.child(div().px(10).py(6).text_color(t.dim).child("还没有浏览记录")))
-        .children(this.history.slice(0, 100).map((h, i) => v_flex().id(`h-${i}`).px(10).py(5).rounded(8).cursor_pointer().hover(s => s.bg(t.hover))
+        .when(!rows.length, el => el.child(div().h(HISTORY_ROW).px(10).flex().items_center().text_color(t.dim).child("还没有浏览记录")))
+        .children(rows.map((h, i) => v_flex().id(`h-${i}`).h(HISTORY_ROW).flex_none().justify_center().px(10).rounded(7).cursor_pointer().hover(s => s.bg(t.hover))
           .on_click((_e, cx) => { this.input.set_value(h.url); this.go(h.url, cx); })
           .child(div().truncate().child(h.title || h.url))
           .child(div().truncate().text_size(11).text_color(t.dim).child(h.url)))));
@@ -331,16 +385,16 @@ export default class Browser extends View {
     const sites = frequentSites(this.history);
     const tile = (s, i) => {
       const color = TILE_COLORS[[...s.host].reduce((a, c) => a + c.charCodeAt(0), 0) % TILE_COLORS.length];
-      return v_flex().id(`site-${i}`).w(120).px(8).py(10).gap(8).items_center().rounded(12).cursor_pointer().hover(x => x.bg(t.hover))
+      return v_flex().id(`site-${i}`).w(112).px(6).py(10).gap(8).items_center().rounded(10).cursor_pointer().hover(x => x.bg(t.hover))
         .on_click((_e, cx) => { this.input.set_value(s.url); this.go(s.url, cx); })
-        .child(div().w(52).h(52).rounded(14).bg(color).flex().items_center().justify_center()
-          .text_size(22).font_semibold().text_color("#ffffff").child(s.host.charAt(0).toUpperCase()))
-        .child(div().w_full().text_center().text_size(13).truncate().child(s.title));
+        .child(div().w(48).h(48).rounded(12).bg(color).flex().items_center().justify_center()
+          .text_size(20).font_semibold().text_color("#ffffff").child(s.host.charAt(0).toUpperCase()))
+        .child(div().w_full().text_center().text_size(12).truncate().child(s.title));
     };
-    return v_flex().id("browser-home").size_full().px(24).py(20).gap(12).bg(t.background)
+    return v_flex().id("browser-home").size_full().px(20).pt(24).pb(16).gap(10).bg(t.background)
       .when(sites.length > 0, el => el
-        .child(div().text_size(15).font_semibold().child("常用网站"))
-        .child(div().flex().flex_wrap().content_start().gap(8).children(sites.map(tile))));
+        .child(div().px(6).text_size(13).font_semibold().text_color(t.muted ?? t.foreground).child("常用网站"))
+        .child(div().flex().flex_wrap().content_start().children(sites.map(tile))));
   }
 
   cardFor(t) {
@@ -357,41 +411,44 @@ export default class Browser extends View {
       return v_flex().size_full().p(16).bg(t.background).text_color(t.dim).text_size(13)
         .child("这个版本的 Herdr 不能在窗口里显示网页，需要 DD-up。");
     }
-    const nav = h_flex().h(36).flex_none().px(3).items_center().rounded(18).border_1().border_color(t.border)
-      .child(this.icon(t, "b-back", "←", this.canBack, () => this.call("browser.back")))
-      .child(this.icon(t, "b-fwd", "→", this.canForward, () => this.call("browser.forward")))
-      .child(div().w(1).h(16).mx(3).bg(t.border))
-      .child(this.icon(t, "b-reload", this.loading ? "✕" : "↻", Boolean(this.start), () => this.call(this.loading ? "browser.stop" : "browser.reload")))
-      .child(this.icon(t, "b-home", "⌂", Boolean(this.start), () => this.setPanel(this.panel === "home" ? null : "home")));
-    const address = div().flex_1().min_w(0).h(36).px(14).flex().items_center().rounded(18).border_1()
-      .border_color(this.addressFocused ? t.accent : t.border).cursor_text()
+    const page = Boolean(this.start);
+    const nav = h_flex().h(34).flex_none().px(2).items_center().rounded(17).border_1().border_color(t.border)
+      .child(this.icon(t, "b-back", "arrow-left", this.canBack, () => this.call("browser.back")))
+      .child(this.icon(t, "b-fwd", "arrow-right", this.canForward, () => this.call("browser.forward")))
+      .child(div().w(1).h(14).mx(2).bg(t.border))
+      .child(this.icon(t, "b-reload", this.loading ? "x" : "rotate-cw", page, () => this.call(this.loading ? "browser.stop" : "browser.reload"), 30, this.loading ? 16 : 15))
+      .child(this.icon(t, "b-home", "house", page, () => this.setPanel(this.panel === "home" ? null : "home"), 30, 15));
+    const address = div().flex_1().min_w(0).h(34).px(14).flex().items_center().rounded(17).border_1()
+      .border_color(this.addressFocused ? t.accent : (t.chrome ?? t.border)).bg(this.addressFocused ? t.background : (t.chrome ?? t.background)).cursor_text()
       .child(Input.new(this.input).flex_1().h_full().text_size(13).text_color(t.foreground));
-    const more = div().id("b-menu").w(36).h(36).flex_none().flex().items_center().justify_center().rounded(18).border_1()
-      .border_color(t.border).text_size(16).cursor_pointer().hover(s => s.bg(t.hover)).when(CARDS[this.panel] != null, el => el.bg(t.hover))
-      .on_click((_e, cx) => { this.setPanel(CARDS[this.panel] ? null : "menu"); cx.notify(); })
-      .child("⋯");
-    const bar = h_flex().h(52).flex_none().px(10).gap(8).items_center().border_b(1).border_color(t.border)
+    const open = CARDS[this.panel] != null;
+    const more = div().id("b-menu").w(34).h(34).flex_none().flex().items_center().justify_center().rounded(17).border_1()
+      .border_color(t.border).cursor_pointer().hover(s => s.bg(t.hover)).when(open, el => el.bg(t.hover))
+      .on_click((_e, cx) => { this.setPanel(open ? null : "menu"); cx.notify(); })
+      .child(this.glyph("ellipsis", 16, t.foreground));
+    const bar = h_flex().h(50).flex_none().px(8).gap(6).items_center().border_b(1).border_color(t.border)
       .child(nav).child(address).child(more);
-    const findBar = h_flex().h(38).flex_none().px(10).gap(4).items_center().border_b(1).border_color(t.border).text_size(12)
-      .child(div().flex_1().min_w(0).child(Input.new(this.findInput)))
-      .child(div().w(56).text_center().text_color(t.dim).child(this.find ? `${this.find.active}/${this.find.matches}` : ""))
-      .child(this.icon(t, "f-prev", "↑", Boolean(this.find), (cx) => this.runFind(true, false, cx), 26, 26))
-      .child(this.icon(t, "f-next", "↓", Boolean(this.find), (cx) => this.runFind(true, true, cx), 26, 26))
-      .child(this.icon(t, "f-close", "✕", true, () => { this.finding = false; this.find = null; this.findInput.set_value(""); this.call("browser.stopFind"); }, 26, 26));
+    const findBar = h_flex().h(40).flex_none().px(10).gap(4).items_center().border_b(1).border_color(t.border).text_size(12)
+      .child(this.glyph("search", 14, t.dim))
+      .child(div().flex_1().min_w(0).pl(4).child(Input.new(this.findInput).text_size(13)))
+      .child(div().min_w(48).text_center().text_size(12).text_color(t.dim).child(this.find ? `${this.find.active}/${this.find.matches}` : ""))
+      .child(this.icon(t, "f-prev", "chevron-up", Boolean(this.find?.matches), (cx) => this.runFind(true, false, cx), 26, 15))
+      .child(this.icon(t, "f-next", "chevron-down", Boolean(this.find?.matches), (cx) => this.runFind(true, true, cx), 26, 15))
+      .child(this.icon(t, "f-close", "x", true, () => { this.finding = false; this.find = null; this.findInput.set_value(""); this.call("browser.stopFind"); }, 26, 14));
     const status = this.error
-      ? div().px(12).py(3).flex_none().text_size(11).truncate().text_color(t.blocked).child(`打不开：${this.error}`)
+      ? div().px(12).py(4).flex_none().text_size(12).truncate().text_color(t.blocked).border_b(1).border_color(t.border).child(`打不开：${this.error}`)
       : null;
     const card = this.cardFor(t);
     const overlay = div().size_full().relative()
-      .when(this.panel === "home" || !this.start, el => el.child(this.homePanel(t)))
+      .when(this.panel === "home" || !page, el => el.child(this.homePanel(t)))
       .when(Boolean(card), el => el.child(card));
-    const page = div().flex_1().min_h(0).relative()
-      .when(Boolean(this.start), el => el.child(herdr.nativeView.new(ID, { kind: this.engine, url: this.start, persist: true }).child(overlay)))
-      .when(!this.start, el => el.child(overlay));
+    const body = div().flex_1().min_h(0).relative()
+      .when(page, el => el.child(herdr.nativeView.new(ID, { kind: this.engine, url: this.start, persist: true }).child(overlay)))
+      .when(!page, el => el.child(overlay));
     return v_flex().id("browser").size_full().min_h(0).overflow_hidden().rounded(10).border_1().border_color(t.border).bg(t.background).text_color(t.foreground)
       .child(bar)
       .when(this.finding, el => el.child(findBar))
       .when(Boolean(status), el => el.child(status))
-      .child(page);
+      .child(body);
   }
 }

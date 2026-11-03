@@ -13,6 +13,7 @@ at build time into `.work/` and is not redistributed in this repository.
 | CEF 156.0.15 (Chromium 156) | Chromium browser framework bundled in Herdr Preview Dev (`Contents/Frameworks`) | BSD-3-Clause (CEF) plus Chromium's third-party licenses | `CREDITS.html` from the CEF distribution (`.local/cef`), copied to `Contents/Resources/CEF-CREDITS.html` by `scripts/build` |
 | cef, cef-dll-sys (tauri-apps/cef-rs 156.3.0) | Rust bindings for CEF in `native/` (feature `chromium`) | MIT OR Apache-2.0 | crates.io metadata, upstream THIRD-PARTY-NOTICES |
 | serde, serde_json | JSON in `native/` | MIT OR Apache-2.0 | crates.io metadata |
+| Lucide icons (16 SVGs in `mods/browser/icons/`) | toolbar and menu icons of the browser mod; the same icon set Herdr ships | ISC (Feather portions MIT) | `mods/browser/icons/LICENSE-Lucide.txt`, lucide.dev |
 
 Built bundles carry upstream's `LICENSE` and `THIRD-PARTY-NOTICES` in
 `Contents/Resources/` (see `scripts/build`). Dependencies added by this project

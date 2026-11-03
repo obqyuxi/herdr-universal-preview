@@ -165,3 +165,20 @@
 
 - 用户要求等功能打磨完善后再提。已经用 obqyuxi 账号把 herdrdev/herdr-app#425 关闭为 not planned，没有留言；普通用户删不掉 issue，只能关闭。
 - 重新提交时，以 `docs/upstream/issue-native-view.md` 为底稿，并补上 `setHoles`（菜单卡片浮在网页上）这类新能力。
+
+## D20 浏览器 UI 打磨（/impeccable polish，2026-11-03）
+
+- 新增按键命令 `browser.menu`、`browser.panel:<卡片名>`、`browser.close`、`browser.address`、`browser.find`、`browser.home`，可以在 keys.json 里绑定快捷键。测试时用 `herdr-app do browser.panel:history` 打开某张卡片，再用 `shot` 截图；卡片是 GPUI 画的，能截进去，网页本身截不到。
+- 根据截图逐项修正：
+  - 文字符号（← → ↻ ⌂ ⋯ ‹ ✕ ✓）全部换成 Lucide 线条图标（与 Herdr 同一套，ISC 许可，见 THIRD_PARTY_NOTICES）。
+  - 卡片改用 Herdr 菜单的参数：`t.popover` 背景，32px 行高，13px 字号，7px 圆角。
+  - 卡片高度按内容计算，历史记录和下载随条目增加（最多 8 行，再多就滚动）。
+  - 中文说明拆成短句，每句一行，避免标点出现在行首。
+  - 历史记录同一网页只列一次。
+  - 地址栏改用 Herdr chrome 的浅色底，聚焦时换成强调色描边。
+  - 菜单里只有需要确认的项（导入 Cookie…、清除浏览数据…）带省略号。
+- 限制：洞只显示卡片自身，无法带出卡片外的柔和阴影，层次只能靠描边和 popover 底色。
+- 验证：
+  - 每张卡片在隔离环境里截图检查过（`.local/ui-*.png`，不入库）。
+  - impeccable detect 没有发现问题。
+  - Chromium 自检 6/6 通过；打开历史卡片时有遮罩，洞内点击落到 Herdr。
