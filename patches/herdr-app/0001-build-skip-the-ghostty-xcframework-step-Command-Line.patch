@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Mon, 2 Nov 2026 21:02:13 -0800
-Subject: [PATCH] build: skip the ghostty xcframework step (Command Line Tools
- only)
+Subject: [PATCH 1/2] build: skip the ghostty xcframework step (Command Line
+ Tools only)
 
 Herdr links only libghostty-vt.a. In lib-vt mode ghostty emits an
 xcframework whenever an xcodebuild is on PATH, but the Command Line Tools

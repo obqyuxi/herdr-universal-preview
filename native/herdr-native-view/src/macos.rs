@@ -133,11 +133,7 @@ pub fn ensure(key: &str, gpui_view: *mut c_void, props: &Value) -> Result<u64, S
             e.spec = spec.clone();
             e.generation
         });
-        let r = VIEWS.with(|v| {
-            let v = v.borrow();
-            let e = &v[key];
-            load(mtm, key, &e.renderer, &e.spec, generation)
-        });
+        let r = load_entry(mtm, key, generation);
         if let Err(err) = &r {
             emit(key, generation, "load.error", json!({ "message": err }));
         }
@@ -171,11 +167,7 @@ pub fn ensure(key: &str, gpui_view: *mut c_void, props: &Value) -> Result<u64, S
         suppressed: false,
     };
     VIEWS.with(|v| v.borrow_mut().insert(key.to_owned(), entry));
-    let r = VIEWS.with(|v| {
-        let v = v.borrow();
-        let e = &v[key];
-        load(mtm, key, &e.renderer, &e.spec, generation)
-    });
+    let r = load_entry(mtm, key, generation);
     emit(
         key,
         generation,
@@ -292,7 +284,7 @@ fn load(
     r: &Renderer,
     spec: &Spec,
     generation: u64,
-) -> Result<(), String> {
+) -> Result<Option<Retained<AVPlayer>>, String> {
     unsafe {
         match (r, &spec.source) {
             (Renderer::Web { view, delegate }, src) => {
@@ -312,7 +304,7 @@ fn load(
                         );
                     }
                 }
-                Ok(())
+                Ok(None)
             }
             (Renderer::Pdf { view, .. }, Source::File { path, .. }) => {
                 let doc = PDFDocument::initWithURL(PDFDocument::alloc(), &file_url(path))
@@ -320,40 +312,54 @@ fn load(
                 if doc.isLocked() {
                     view.setDocument(Some(&doc));
                     emit(key, generation, "pdf.locked", json!({}));
-                    return Ok(());
+                    return Ok(None);
                 }
                 view.setDocument(Some(&doc));
                 emit(key, generation, "load.finish", pdf_state(view));
-                Ok(())
+                Ok(None)
             }
             (Renderer::Media { view, .. }, Source::File { path, .. }) => {
                 let player = AVPlayer::playerWithURL(&file_url(path), mtm);
                 // Never autoplay; the person presses play.
                 player.pause();
                 view.setPlayer(Some(&player));
-                VIEWS.with(|v| {
-                    if let Some(e) = v.borrow_mut().get_mut(key)
-                        && let Renderer::Media { player: p, .. } = &mut e.renderer
-                    {
-                        if let Some(old) = p.take() {
-                            old.pause();
-                            old.replaceCurrentItemWithPlayerItem(None);
-                        }
-                        *p = Some(player.clone());
-                    }
-                });
                 emit(key, generation, "load.finish", json!({}));
-                Ok(())
+                Ok(Some(player))
             }
             (Renderer::QuickLook { view }, Source::File { path, .. }) => {
                 let url = file_url(path);
                 view.setPreviewItem(Some(ProtocolObject::<dyn QLPreviewItem>::from_ref(&*url)));
                 emit(key, generation, "load.finish", json!({}));
-                Ok(())
+                Ok(None)
             }
             _ => Err("this kind needs a local file".into()),
         }
     }
+}
+
+/// Loads an entry's current spec. The registry is borrowed only while AppKit
+/// is told what to load, and a new media player is stored after that borrow
+/// ends (nested borrows would panic, and a panic here aborts the app).
+fn load_entry(mtm: MainThreadMarker, key: &str, generation: u64) -> Result<(), String> {
+    let player = VIEWS.with(|v| {
+        let v = v.borrow();
+        let e = v.get(key).ok_or("view is gone")?;
+        load(mtm, key, &e.renderer, &e.spec, generation)
+    })?;
+    if let Some(player) = player {
+        VIEWS.with(|v| {
+            if let Some(e) = v.borrow_mut().get_mut(key)
+                && let Renderer::Media { player: p, .. } = &mut e.renderer
+                && let Some(old) = p.replace(player)
+            {
+                unsafe {
+                    old.pause();
+                    old.replaceCurrentItemWithPlayerItem(None);
+                }
+            }
+        });
+    }
+    Ok(())
 }
 
 fn pdf_state(view: &PDFView) -> Value {
@@ -508,10 +514,11 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
             VIEWS.with(|v| {
                 if let Some(e) = v.borrow_mut().get_mut(key) {
                     e.wanted_hidden = !on;
+                    // Apply now: a call may come without a frame following it.
+                    let can_show =
+                        e.shown && !e.suppressed && e.painted.is_some_and(|r| !r.is_empty());
+                    e.view.setHidden(!(on && can_show));
                     e.applied = None;
-                    if !on {
-                        e.view.setHidden(true);
-                    }
                 }
             });
             return Ok(Value::Null);
@@ -652,12 +659,19 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
         }
     })?;
     if let Some(spec) = reload {
-        // Navigation through the address bar is a new load: new generation.
-        let gpui = VIEWS.with(|v| v.borrow().get(key).and_then(|e| e.gpui.load()));
-        let g = gpui.ok_or("window is gone")?;
-        let _ = mtm;
-        return ensure(key, Retained::as_ptr(&g) as *mut c_void, &spec)
-            .map(|g| json!({ "generation": g }));
+        // Navigation through the address bar is a new load (new generation) of
+        // the same view. `spec_json` keeps the mod's props, so the mod's next
+        // render doesn't see a change and reload its own URL over this one.
+        let spec = Spec::parse(&spec)?;
+        let generation = VIEWS.with(|v| {
+            let mut v = v.borrow_mut();
+            let e = v.get_mut(key).ok_or("view is gone")?;
+            e.generation += 1;
+            e.spec = spec;
+            Ok::<u64, String>(e.generation)
+        })?;
+        load_entry(mtm, key, generation)?;
+        return Ok(json!({ "generation": generation }));
     }
     Ok(out)
 }

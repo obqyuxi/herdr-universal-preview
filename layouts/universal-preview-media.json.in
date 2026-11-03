@@ -1,0 +1,34 @@
+{
+  "id": "root",
+  "type": "row",
+  "titlebar": "none",
+  "traffic_lights": [12, 16],
+  "background": "canvas",
+  "padding": [6, 6],
+  "gap": 6,
+  "children": [
+    {
+      "id": "work",
+      "type": "column",
+      "size": { "weight": 1 },
+      "min": 240,
+      "children": [
+        { "id": "tabs", "type": "block", "size": { "px": 38 }, "window_drag": true, "content": { "mod": "terminals-bar" } },
+        { "id": "main", "type": "block", "content": { "tab": "active", "pane": { "radius": 10, "gap": 6, "lone": true } } }
+      ]
+    },
+    {
+      "id": "previews",
+      "type": "column",
+      "size": { "weight": 1 },
+      "min": 280,
+      "gap": 6,
+      "children": [
+        { "id": "preview-a", "type": "block", "size": { "weight": 1 }, "min": 120, "radius": 10, "border": { "width": 1, "color": "border" },
+          "content": { "mod": "native-probe", "props": { "slot": "a", "start": 4, "samples": "@SAMPLES@" } } },
+        { "id": "preview-b", "type": "block", "size": { "weight": 1 }, "min": 120, "radius": 10, "border": { "width": 1, "color": "border" },
+          "content": { "mod": "native-probe", "props": { "slot": "b", "start": 9, "samples": "@SAMPLES@" } } }
+      ]
+    }
+  ]
+}

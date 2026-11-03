@@ -18,6 +18,7 @@ Core (session "$HUP_SESSION", state under $HUP_SHORT -> .local):
                       official one, stop it, write artifacts/isolation-*.json
 
 App (Herdr Preview Dev):
+  app-install         copy mods/* and layouts/*.json.in (samples path filled in) into the test home
   app-up [layout]     start the dev app (isolated home, core and session)
   app-down            stop the dev app this project started
   app <args...>       run the dev app CLI (status, do, check, ls ...) against the test home
@@ -157,7 +158,34 @@ app_up() {
     kill -0 "$pid" 2>/dev/null || { tail -20 "$HUP_LOGS/app.log" >&2; hup_die "dev app exited"; }
     sleep 0.2
   done
-  if [[ -n ${1:-} ]]; then "$HUP_DEV_EXE" do app.layout "{\"name\":\"$1\"}" || true; fi
+  if [[ -n ${1:-} ]]; then "$HUP_DEV_EXE" do layout.switch "{\"name\":\"$1\"}" >/dev/null || hup_die "layout.switch $1 failed"; fi
+}
+
+app_install() {
+  hup_isolate
+  mkdir -p "$HUP_APP_HOME/mods" "$HUP_APP_HOME/layouts"
+  local m n
+  for m in "$HUP_ROOT"/mods/*/; do
+    n=$(basename "$m")
+    rm -rf "${HUP_APP_HOME:?}/mods/$n.tmp"
+    cp -R "$m" "$HUP_APP_HOME/mods/$n.tmp"
+    rm -rf "${HUP_APP_HOME:?}/mods/$n"
+    mv "$HUP_APP_HOME/mods/$n.tmp" "$HUP_APP_HOME/mods/$n"
+    echo "mod $n -> test home"
+  done
+  for l in "$HUP_ROOT"/layouts/*.json.in; do
+    [[ -f $l ]] || continue
+    n=$(basename "$l" .json.in)
+    /usr/bin/python3 - "$l" "$HUP_APP_HOME/layouts/$n.json" "$HUP_ROOT/tests/fixtures/samples" <<'PY'
+import json, sys
+src, dst, samples = sys.argv[1:]
+text = open(src).read().replace("@SAMPLES@", samples)
+json.loads(text)
+open(dst + ".tmp", "w").write(text)
+import os; os.replace(dst + ".tmp", dst)
+PY
+    echo "layout $n -> test home"
+  done
 }
 
 app_down() {
@@ -182,6 +210,7 @@ case $cmd in
   core-down) core_down ;;
   hc) hup_ensure_short_link; hup_isolate; hup_hc "$@" ;;
   isolation-check) isolation_check ;;
+  app-install) app_install ;;
   app-up) app_up "${1:-}" ;;
   app-down) app_down ;;
   app) app_env; "$HUP_DEV_EXE" "$@" ;;

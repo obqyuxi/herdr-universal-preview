@@ -42,6 +42,6 @@
 
 接口版本 `native-view/0`。它通过 `herdr` 模块导出，Mod 用 `import * as herdr from "herdr"` 探测：原版上 `herdr.nativeView` 为 `undefined`，Mod 显示"当前版本未提供原生预览"，不会加载失败。
 
-- 元素：`nativeView(id, { kind, src, ... })`，以组件形式导出，宿主在 paint 阶段取得 bounds 并同步 NSView frame。
+- 元素：`herdr.nativeView.new(id, { kind, url | path, trust?, root? })`，以组件形式导出（与 `Editor.new` 写法相同），宿主在 paint 阶段取得 bounds 并同步 NSView frame。
 - 函数：`nativeViewCapabilities()`、`nativeViewCall(id, action, args)`（按渲染器白名单分发，例如 `browser.back`、`pdf.goToPage`、`media.pause`）、`nextNativeViewEvent()`（长轮询；每条事件带 view id 和加载代次）。
 - 布局：只使用 `{ "mod": "...", "props": {...} }`，不新增 `Content` 变体，旧版 App 依旧能解析整份布局。

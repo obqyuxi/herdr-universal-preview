@@ -48,3 +48,28 @@
 - **选择**：在 `crates/ghostty-sys/build.rs` 中传入 `-Demit-xcframework=false`。Herdr 只链接 `libghostty-vt.a`，不受影响。
 - **被否决**：安装完整 Xcode。体积大，属于系统级软件，需要用户同意，而且对本项目没有必要。
 - **影响**：上游的 `tests/notices.rs` 会对 build.rs 的指纹报警。等 M1 新增依赖时，用 `cargo-about 0.9.3`（安装在项目内）配合上游 `scripts/notices.ts` 重新生成 notices。
+
+## D7 `nativeView` 是宿主组件，不是新的布局节点（M1）
+
+- **实现**：`HostModule::component`。JS 端的写法是 `herdr.nativeView.new(id, props)`，与 `Editor.new` 一致，因为 gpui-kit 把组件包装成 `{ new }` 对象。
+- **尺寸**：元素自己 `size_full`，宿主 materialize 不会给它套样式。
+- **位置**：在 paint 阶段记录 `bounds ∩ content_mask`；窗口最后绘制的 canvas 统一换算到 NSView 坐标（y 翻转、`convertRect:toView:`）。
+- **生命周期**：
+  - mod copy 消失时销毁视图；
+  - copy 不在屏幕上时隐藏，媒体同时暂停；
+  - mod 的 props 变化时，在同一视图中重新加载，加载代次加 1；
+  - 视图内导航不改变 mod 的 props。
+
+## D8 遮挡协调：第一版让位并保留状态（M1）
+
+- 浮层的矩形无法枚举，见 `window.rs` 的 `render_overlays`。只要存在非 toast 浮层（dialog、popup、window）或正在拖动 pane，就隐藏所有原生视图。NSView 不销毁，状态保留；mod 的占位文字说明"暂时遮挡"。
+- **已知限制**：
+  - toast 会被原生视图盖住；
+  - mod 自己的 GPUI popover 也会被盖住（mod 可以自行 `setVisible`）；
+  - float 尚未处理。
+- **后续**：考虑在 `render_overlays` 中捕获矩形，改为 mask 挖洞。
+
+## D9 焦点（M1）
+
+- 加一个本地事件监视器（只监视 mouseDown）：点击落在所有原生视图之外，而当前 first responder 在某个原生视图内时，把 first responder 交还 GPUIView。
+- mod 也可以调用 `blur` 主动交还焦点。

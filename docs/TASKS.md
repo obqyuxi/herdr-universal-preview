@@ -11,12 +11,12 @@
 | T0.5 | M0 | core 隔离验证 | 完成 | `scripts/dev isolation-check` | A22（core 部分） |
 | T0.6 | M0 | 基线编译（v0.1.12 + 构建补丁 0001） | 完成 | 补丁前：ghostty 需要 xcodebuild（完整 Xcode），失败；加补丁 0001 后，只用 CLT 编译通过。上游 cargo test：258 通过，1 项 `notices` 因为 build.rs 指纹变化而失败（预期，M1 中重新生成 notices） | — |
 | T0.7 | M0 | doctor / dev / build / test / prepare-upstream / bootstrap-toolchain 脚本 | 完成 | install/uninstall/rollback/package 在 M5 提供 | — |
-| T1.1 | M1 | `native/herdr-native-view` crate：web/pdf/media/quicklook | 未开始 | — | — |
-| T1.2 | M1 | 宿主补丁：`nativeView` 组件、函数、帧末同步、遮挡隐藏、开发版保护、`native.debug` | 未开始 | — | — |
-| T1.3 | M1 | 测试样例生成（HTML/PDF/MP4/MOV/WAV/M4A/MP3/DOCX/XLSX/PPTX） | 未开始 | — | — |
-| T1.4 | M1 | native-probe mod + 双预览布局 | 未开始 | — | — |
-| T1.5 | M1 | 隔离启动 Herdr Preview Dev，宿主自检 | 未开始 | — | — |
-| T1.6 | M1 | 人工 GUI 验收清单 + 结果 | 未开始 | 需要用户操作 | A16/A17/A18（原型级） |
+| T1.1 | M1 | `native/herdr-native-view` crate：web/pdf/media/quicklook | 完成（原型） | 自检通过；GUI 待验收 | — |
+| T1.2 | M1 | 宿主补丁：`nativeView` 组件、函数、帧末同步、遮挡隐藏、开发版保护、`native.debug` | 完成（原型） | 补丁 0002；上游测试全部通过 | — |
+| T1.3 | M1 | 测试样例生成（HTML/PDF/MP4/MOV/WAV/M4A/MP3/DOCX/XLSX/PPTX） | 完成 | `tests/fixtures/generate`，探针结果见 `samples/PROBE.txt` | — |
+| T1.4 | M1 | native-probe mod + 双预览布局 | 完成 | 正式 0.1.12 上的 check 也通过 | — |
+| T1.5 | M1 | 隔离启动 Herdr Preview Dev，宿主自检 | 完成 | 13/13 + 7/7；正式环境指纹不变 | — |
+| T1.6 | M1 | 人工 GUI 验收清单 + 结果 | 进行中 | 等用户按 `tests/gui/M1_CHECKLIST.md` 操作 | A16/A17/A18（原型级） |
 | T2.x | M2 | universal-files、ResourceRef、路由、文本/Markdown/图片、标签规则、监听 | 未开始 | — | A01–A03, A12–A15 |
 | T3.x | M3 | PDF/Office/媒体/浏览器完整化 | 未开始 | — | A04–A11 |
 | T4.x | M4 | 稳定性、安全、兼容 | 未开始 | — | A16–A21, A23 |
