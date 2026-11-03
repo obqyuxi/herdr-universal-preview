@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Install the build toolchain into the project only (.local/toolchain):
-# Rust (rustup, pinned toolchain) and Zig, both checksum-verified.
+# Install the build toolchain into the project only (.local/):
+# Rust (rustup, pinned toolchain) and Zig, both checksum-verified; cmake and
+# ninja in a uv venv (.local/py, needed to build CEF's C++ wrapper); the CEF
+# binary distribution (.local/cef) via tauri-apps/cef-rs export-cef-dir.
 # Never edits shell profiles, global PATH, Homebrew or system directories.
 set -euo pipefail
 . "$(dirname "$0")/lib/env.sh"
@@ -12,11 +14,14 @@ Usage: scripts/bootstrap-toolchain [--check]
 Installs, into $HUP_TOOLCHAIN:
   rust  $(jq_lock rust) via rustup (--no-modify-path, minimal profile)
   zig   $(jq_lock zig)  official tarball, sha256 from ziglang.org index.json
+  cmake $(jq_lock cmake), ninja $(jq_lock ninja) into $HUP_LOCAL/py (needs uv)
+  CEF   $(jq_cef cef_version) into $HUP_LOCAL/cef (cef-rs $(jq_cef tag), ~1 GB download)
 
   --check   report what is installed; install nothing (exit 1 if incomplete)
 EOF
 }
 jq_lock() { /usr/bin/python3 -c "import json;print(json.load(open('$HUP_ROOT/upstream.lock.json'))['toolchain']['$1'])"; }
+jq_cef() { /usr/bin/python3 -c "import json;print(json.load(open('$HUP_ROOT/upstream.lock.json'))['cef']['$1'])"; }
 
 check=0
 case ${1:-} in
@@ -32,11 +37,15 @@ mkdir -p "$HUP_TOOLCHAIN"
 
 have_rust() { [[ -x $CARGO_HOME/bin/rustc ]] && "$CARGO_HOME/bin/rustc" --version | grep -q " $RUST "; }
 have_zig() { [[ -x $ZIG ]] && [[ $("$ZIG" version) == "$ZIGV" ]]; }
+have_cmake() { [[ -x $HUP_LOCAL/py/bin/cmake && -x $HUP_LOCAL/py/bin/ninja ]] && "$HUP_LOCAL/py/bin/cmake" --version | grep -q " $(jq_lock cmake)"; }
+have_cef() { [[ -d "$CEF_PATH/Chromium Embedded Framework.framework" ]] && grep -q "$(jq_cef cef_version)" "$CEF_PATH/archive.json" 2>/dev/null; }
 
 if (( check )); then
   ok=0
   have_rust && echo "rust: $("$CARGO_HOME/bin/rustc" --version)" || { echo "rust: missing ($RUST)"; ok=1; }
   have_zig && echo "zig: $("$ZIG" version)" || { echo "zig: missing ($ZIGV)"; ok=1; }
+  have_cmake && echo "cmake/ninja: $HUP_LOCAL/py" || { echo "cmake/ninja: missing"; ok=1; }
+  have_cef && echo "cef: $CEF_PATH" || { echo "cef: missing ($(jq_cef cef_version))"; ok=1; }
   exit $ok
 fi
 
@@ -68,3 +77,22 @@ if ! have_zig; then
   have_zig || hup_die "zig $ZIGV not usable after install"
 fi
 echo "zig: $("$ZIG" version)"
+
+if ! have_cmake; then
+  echo "== cmake $(jq_lock cmake), ninja $(jq_lock ninja) (uv venv $HUP_LOCAL/py)"
+  command -v uv >/dev/null || hup_die "uv is needed for cmake/ninja: https://docs.astral.sh/uv/"
+  uv venv --quiet --allow-existing "$HUP_LOCAL/py"
+  uv pip install --quiet --python "$HUP_LOCAL/py" "cmake==$(jq_lock cmake)" "ninja==$(jq_lock ninja)"
+  have_cmake || hup_die "cmake/ninja not usable after install"
+fi
+echo "cmake/ninja: $HUP_LOCAL/py"
+
+if ! have_cef; then
+  echo "== CEF $(jq_cef cef_version) (cef-rs $(jq_cef tag))"
+  src=$HUP_WORK/cef-rs
+  [[ -d $src/.git ]] || git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$(jq_cef tag)" "$(jq_cef repo)" "$src"
+  [[ $(git -C "$src" rev-parse HEAD) == "$(jq_cef commit)" ]] || hup_die "cef-rs at $(git -C "$src" rev-parse HEAD), expected $(jq_cef commit)"
+  (cd "$src" && cargo run -q -p export-cef-dir -- --force "$CEF_PATH")
+  have_cef || hup_die "CEF not usable after export (see $CEF_PATH)"
+fi
+echo "cef: $CEF_PATH"
