@@ -16,6 +16,9 @@ pub mod macos;
 #[cfg(all(target_os = "macos", feature = "chromium"))]
 pub mod chromium;
 
+#[cfg(target_os = "macos")]
+pub mod chrome_import;
+
 /// The interface version mods check before using any of this.
 pub const INTERFACE: &str = "native-view/0";
 
@@ -165,6 +168,7 @@ impl Kind {
                 "browser.stopFind",
                 "browser.clearData",
                 "browser.revealDownload",
+                "browser.importChromeCookies",
             ],
         }
     }

@@ -35,6 +35,7 @@ pub struct Info {
 }
 
 pub struct ChromiumView {
+    pub key: String,
     pub browser: Browser,
     pub info: Arc<Mutex<Info>>,
     pub generation: Arc<std::sync::atomic::AtomicU64>,
@@ -45,6 +46,68 @@ thread_local! {
     static LOADER: RefCell<Option<library_loader::LibraryLoader>> = const { RefCell::new(None) };
     static PUMP: RefCell<Option<Retained<NSTimer>>> = const { RefCell::new(None) };
     static IN_PUMP: Cell<bool> = const { Cell::new(false) };
+    /// A running "import Chrome cookies": who asked, and where the result arrives.
+    static IMPORT: RefCell<Option<ImportJob>> = const { RefCell::new(None) };
+}
+
+type ImportJob = (
+    String,
+    Arc<std::sync::atomic::AtomicU64>,
+    std::sync::mpsc::Receiver<Result<crate::chrome_import::ImportResult, String>>,
+);
+
+/// Applies a finished cookie import (main thread, from the pump).
+fn finish_import() {
+    let done = IMPORT.with(|i| {
+        let mut i = i.borrow_mut();
+        let r = i.as_ref().and_then(|(_, _, rx)| rx.try_recv().ok())?;
+        let (key, generation, _) = i.take()?;
+        Some((key, generation, r))
+    });
+    let Some((key, generation, r)) = done else { return };
+    match r {
+        Err(message) => report(&key, &generation, "import.error", json!({ "message": message })),
+        Ok(res) => {
+            let Some(manager) = cookie_manager_get_global_manager(None) else {
+                report(&key, &generation, "import.error", json!({ "message": "浏览器的 Cookie 存储不可用" }));
+                return;
+            };
+            let mut sites = std::collections::HashSet::new();
+            let mut set = 0;
+            for c in &res.cookies {
+                let host = c.host.trim_start_matches('.');
+                let path = if c.path.is_empty() { "/" } else { c.path.as_str() };
+                let url = format!("{}://{}{}", if c.secure { "https" } else { "http" }, host, path);
+                let cookie = Cookie {
+                    name: CefString::from(c.name.as_str()),
+                    value: CefString::from(c.value.as_str()),
+                    domain: CefString::from(c.host.as_str()),
+                    path: CefString::from(c.path.as_str()),
+                    secure: c.secure as i32,
+                    httponly: c.httponly as i32,
+                    creation: Basetime { val: c.creation },
+                    last_access: Basetime { val: c.last_access },
+                    has_expires: c.has_expires as i32,
+                    expires: Basetime { val: c.expires },
+                    same_site: match c.samesite {
+                        0 => CookieSameSite::NO_RESTRICTION,
+                        1 => CookieSameSite::LAX_MODE,
+                        2 => CookieSameSite::STRICT_MODE,
+                        _ => CookieSameSite::UNSPECIFIED,
+                    },
+                    priority: CookiePriority::MEDIUM,
+                    ..Default::default()
+                };
+                if manager.set_cookie(Some(&CefString::from(url.as_str())), Some(&cookie), None) != 0 {
+                    set += 1;
+                    sites.insert(host.trim_start_matches("www.").to_owned());
+                }
+            }
+            manager.flush_store(None);
+            let skipped = res.skipped + res.cookies.len() - set;
+            report(&key, &generation, "import.done", json!({ "profile": res.profile, "cookies": set, "sites": sites.len(), "skipped": skipped }));
+        }
+    }
 }
 
 fn pump() {
@@ -52,6 +115,7 @@ fn pump() {
         return;
     }
     do_message_loop_work();
+    finish_import();
     IN_PUMP.with(|p| p.set(false));
 }
 
@@ -216,6 +280,7 @@ pub fn create(
     Ok((
         view,
         ChromiumView {
+            key: key.to_owned(),
             browser,
             info,
             generation: gen_cell,
@@ -285,6 +350,18 @@ impl ChromiumView {
                     Some(&CefString::from("Network.clearBrowserCookies")),
                     None,
                 );
+            }
+            "browser.importChromeCookies" => {
+                if IMPORT.with(|i| i.borrow().is_some()) {
+                    return Err("正在导入，请稍候".into());
+                }
+                let (tx, rx) = std::sync::mpsc::channel();
+                // Off the main thread: the Keychain prompt waits for the person.
+                std::thread::spawn(move || {
+                    let _ = tx.send(crate::chrome_import::read());
+                });
+                IMPORT.with(|i| *i.borrow_mut() = Some((self.key.clone(), self.generation.clone(), rx)));
+                return Ok(json!({ "started": true }));
             }
             "browser.revealDownload" => {
                 let id = args
