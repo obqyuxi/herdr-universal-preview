@@ -160,3 +160,8 @@
   - 原生单元测试 11 项通过。
   - 隔离环境里的自检全部通过：Chromium 6/6、网页与 PDF 13/13、音视频与 Quick Look 7/7；挖洞后遮罩生效，洞中心的点击落到 Herdr；非法参数会被拒绝。
   - 卡片的外观和点击需要用户在真实界面上确认。真实的 Chrome 导入会弹出钥匙串授权，没有自动测试。
+
+## D19 暂时撤回官方 issue（用户决定，2026-11-03）
+
+- 用户要求等功能打磨完善后再提。已经用 obqyuxi 账号把 herdrdev/herdr-app#425 关闭为 not planned，没有留言；普通用户删不掉 issue，只能关闭。
+- 重新提交时，以 `docs/upstream/issue-native-view.md` 为底稿，并补上 `setHoles`（菜单卡片浮在网页上）这类新能力。
