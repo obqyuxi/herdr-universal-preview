@@ -9,9 +9,11 @@ case ${1:-} in
 Usage: scripts/install [--dry-run] [--app-dir DIR]
        scripts/install --layout-from NAME [--dry-run]
 
-  --layout-from NAME  add layouts/<LAYOUT>-NAME.json: your own layout NAME with
-              Files -> files-plus, tabs -> tabs-plus and a browser panel; NAME itself
-              is left as it is. Remembered, so later installs regenerate it.
+  --layout-from NAME  build the <LAYOUT> layout on your own layout NAME (e.g. main-folders):
+              Files -> files-plus, tabs -> tabs-plus, a browser in the Files panel;
+              NAME itself is left as it is. Remembered for later installs.
+              Without it: the official main layout + DD-up.
+  Replacing only mods/layouts works while the app is open; a new app build needs it quit.
 
   Build first: scripts/build --daily (artifacts/apps.noindex/<APP_NAME>.app).
   Adds  DIR/<APP_NAME>.app (default ~/Applications),

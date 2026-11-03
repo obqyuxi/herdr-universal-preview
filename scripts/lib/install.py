@@ -112,18 +112,19 @@ def derive_layout(base: str) -> dict:
     return doc
 
 
-def derived_items(bases):
-    items = []
+def layout_source(base):
+    """layouts/<LAYOUT>.json: the shipped one (official main + DD-up), or the
+    person's own layout `base` with DD-up's changes. One DD-up layout either way."""
+    if not base:
+        return ROOT / "layouts/herdr-preview.json.in"
     tmpdir = Path(os.environ.get("TMPDIR", "/tmp")) / f"hup-layouts-{os.getpid()}"
     tmpdir.mkdir(parents=True, exist_ok=True)
-    for base in bases:
-        src = tmpdir / f"{LAYOUT}-{base}.json"
-        src.write_text(json.dumps(derive_layout(base), indent=2, ensure_ascii=False) + "\n")
-        items.append(("layout", APP_HOME / "layouts" / f"{LAYOUT}-{base}.json", src))
-    return items
+    src = tmpdir / f"{LAYOUT}.json"
+    src.write_text(json.dumps(derive_layout(base), indent=2, ensure_ascii=False) + "\n")
+    return src
 
 
-def plan_install(app_dir: Path):
+def plan_install(app_dir: Path, base_arg):
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     want = lock["herdr_app"]["tag"].lstrip("v")
     if not BUILT.exists():
@@ -138,10 +139,13 @@ def plan_install(app_dir: Path):
         die(f"no Herdr home at {APP_HOME}: open Herdr once first")
     old = load_manifest() or {"entries": []}
     ours = {e["path"]: e for e in old["entries"]}
+    # The layout's base: given now, else remembered ("bases" was the older list form).
+    base = base_arg if base_arg is not None else old.get("base", (old.get("bases") or [None])[0])
+    if base in ("", "main"):
+        base = None if base == "" else base
     items = [("app", app_dir / f"{NAME}.app", BUILT)]
     items += [("mod", APP_HOME / "mods" / m, ROOT / "mods" / m) for m in MODS]
-    items += [("layout", APP_HOME / "layouts" / f"{LAYOUT}.json", ROOT / "layouts/herdr-preview.json.in")]
-    items += derived_items(old.get("bases", []))
+    items += [("layout", APP_HOME / "layouts" / f"{LAYOUT}.json", layout_source(base))]
     actions, conflicts = [], []
     for kind, dst, src in items:
         if dst.exists():
@@ -153,10 +157,16 @@ def plan_install(app_dir: Path):
             if prev["sha256"] != now:
                 conflicts.append(f"{dst} was changed after installing; move your changes aside first")
                 continue
+            if kind == "app" and now == app_fingerprint(src):
+                actions.append(("same", kind, dst, src))   # same build: leave the (maybe running) app alone
+                continue
             actions.append(("replace", kind, dst, src))
         else:
             actions.append(("add", kind, dst, src))
-    return built_ver, actions, conflicts, old.get("bases", [])
+    # Earlier installs may have left entries this one no longer makes (e.g. dd-up-<base>.json).
+    keep = {str(d) for _, _, d, _ in actions}
+    stale = [e for e in old["entries"] if e["path"] not in keep]
+    return built_ver, actions, conflicts, base, stale
 
 
 def copy_atomic(src: Path, dst: Path):
@@ -180,48 +190,43 @@ def copy_atomic(src: Path, dst: Path):
         shutil.rmtree(old) if old.is_dir() else old.unlink()
 
 
-def install(app_dir: Path, dry: bool):
-    built_ver, actions, conflicts, bases = plan_install(app_dir)
+def install(app_dir: Path, dry: bool, base_arg=None):
+    built_ver, actions, conflicts, base, stale = plan_install(app_dir, base_arg)
     print(f"{NAME} {built_ver} (official Herdr {official_version() or 'not found'}), home {APP_HOME}")
+    print(f"  layout {LAYOUT}: {'from your ' + base + '.json (left as it is)' if base else 'official main + DD-up'}")
     for a, kind, dst, _ in actions:
         print(f"  {a:8} {kind:6} {dst}")
+    for e in stale:
+        p = Path(e["path"])
+        changed = p.exists() and (app_fingerprint(p) if e["kind"] == "app" else fingerprint(p)) != e["sha256"]
+        print(f"  {'KEEP' if changed else 'remove':8} {e['kind']:6} {p}{' (changed after install; left for you)' if changed else ''}")
     if conflicts:
         for c in conflicts:
             print(f"  REFUSE  {c}")
         die("nothing was changed")
-    if running(app_dir / f"{NAME}.app"):
-        die(f"{NAME} is running: quit it first (its terminals keep running in herdr-core)")
+    if any(a in ("add", "replace") and k == "app" for a, k, _, _ in actions) and running(app_dir / f"{NAME}.app"):
+        die(f"{NAME} is running and its app needs replacing: quit it first (its terminals keep running in herdr-core)")
     print("  unchanged: /Applications/Herdr.app, built-in mods and layouts, workspaces, terminals, agents")
     if dry:
         print("dry run: nothing changed")
         return
     entries = []
-    for _, kind, dst, src in actions:
-        copy_atomic(src, dst)
+    for a, kind, dst, src in actions:
+        if a != "same":
+            copy_atomic(src, dst)
         entries.append({"kind": kind, "path": str(dst), "sha256": app_fingerprint(dst) if kind == "app" else fingerprint(dst)})
+    for e in stale:
+        p = Path(e["path"])
+        if not p.exists():
+            continue
+        if (app_fingerprint(p) if e["kind"] == "app" else fingerprint(p)) != e["sha256"]:
+            entries.append(e)
+            continue
+        shutil.rmtree(p) if p.is_dir() else p.unlink()
     STATE.mkdir(parents=True, exist_ok=True)
     rev = plistlib.loads((BUILT / "Contents/Info.plist").read_bytes()).get("CFBundleVersion")
-    MANIFEST.write_text(json.dumps({"installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "build": rev, "home": str(APP_HOME), "bases": bases, "entries": entries}, indent=2, ensure_ascii=False) + "\n")
+    MANIFEST.write_text(json.dumps({"installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "build": rev, "home": str(APP_HOME), "base": base, "entries": entries}, indent=2, ensure_ascii=False) + "\n")
     print(f"installed; manifest: {MANIFEST}")
-
-
-def add_layout(base: str, dry: bool):
-    m = load_manifest()
-    if not m:
-        die(f"{NAME} is not installed: run scripts/install first")
-    (kind, dst, src), = derived_items([base])
-    prev = {e["path"]: e for e in m["entries"]}.get(str(dst))
-    if dst.exists() and (not prev or prev["sha256"] != fingerprint(dst)):
-        die(f"{dst} exists and isn't an unchanged copy from this project; move it aside first")
-    print(f"  {'replace' if dst.exists() else 'add':8} layout {dst}  (from {base}.json, which stays as it is)")
-    if dry:
-        print("dry run: nothing changed")
-        return
-    copy_atomic(src, dst)
-    m["entries"] = [e for e in m["entries"] if e["path"] != str(dst)] + [{"kind": "layout", "path": str(dst), "sha256": fingerprint(dst)}]
-    m["bases"] = sorted(set(m.get("bases", [])) | {base})
-    MANIFEST.write_text(json.dumps(m, indent=2, ensure_ascii=False) + "\n")
-    print(f"added; switch with ctrl-shift-l or: layout.switch {{\"name\":\"{LAYOUT}-{base}\"}}")
 
 
 def uninstall(dry: bool, purge: bool):
@@ -269,7 +274,8 @@ if __name__ == "__main__":
         app_dir = Path(next((rest[i + 1] for i, a in enumerate(rest) if a == "--app-dir"), HOME / "Applications"))
         install(app_dir, dry)
     elif cmd == "add-layout":
-        add_layout(next((a for a in rest if not a.startswith("--")), ""), dry)
+        app_dir = Path(next((rest[i + 1] for i, a in enumerate(rest) if a == "--app-dir"), HOME / "Applications"))
+        install(app_dir, dry, next((a for a in rest if not a.startswith("--") and a != str(app_dir)), ""))
     elif cmd == "uninstall":
         uninstall(dry, "--purge-data" in rest)
     else:
