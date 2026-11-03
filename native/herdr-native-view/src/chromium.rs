@@ -30,6 +30,8 @@ pub struct Info {
     pub can_back: bool,
     pub can_forward: bool,
     pub find: Option<(i32, i32)>,
+    /// Finished or running downloads: id -> full path chosen by the person.
+    pub downloads: std::collections::HashMap<u32, String>,
 }
 
 pub struct ChromiumView {
@@ -183,7 +185,7 @@ pub fn create(
     ensure_started(mtm)?;
     let info = Arc::new(Mutex::new(Info::default()));
     let gen_cell = Arc::new(std::sync::atomic::AtomicU64::new(generation));
-    let window_info = WindowInfo::default().set_as_child(
+    let mut window_info = WindowInfo::default().set_as_child(
         parent as *const NSView as *mut c_void as _,
         &Rect {
             x: 0,
@@ -192,6 +194,10 @@ pub fn create(
             height: 1,
         },
     );
+    // Alloy style: on macOS, CEF refuses Chrome style for a browser with a
+    // native parent ("Chrome style is not supported for this browser"; it
+    // needs its own CEF Views window). So no chrome:// pages or extensions here.
+    window_info.runtime_style = RuntimeStyle::ALLOY;
     let mut client = HupClient::new(key.to_owned(), info.clone(), gen_cell.clone());
     let browser = browser_host_create_browser_sync(
         Some(&window_info),
@@ -263,6 +269,44 @@ impl ChromiumView {
                 host.find(Some(&CefString::from(text)), forward as i32, 0, next as i32);
             }
             "browser.stopFind" => host.stop_finding(1),
+            "browser.clearData" => {
+                // Cookies (logins) and the HTTP cache of this app's own profile.
+                if let Some(m) = cookie_manager_get_global_manager(None) {
+                    m.delete_cookies(None, None, None);
+                    m.flush_store(None);
+                }
+                host.execute_dev_tools_method(
+                    0,
+                    Some(&CefString::from("Network.clearBrowserCache")),
+                    None,
+                );
+                host.execute_dev_tools_method(
+                    0,
+                    Some(&CefString::from("Network.clearBrowserCookies")),
+                    None,
+                );
+            }
+            "browser.revealDownload" => {
+                let id = args
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .ok_or("browser.revealDownload needs { id }")? as u32;
+                let path = self
+                    .info
+                    .lock()
+                    .unwrap()
+                    .downloads
+                    .get(&id)
+                    .cloned()
+                    .ok_or("no such download")?;
+                // Only reveals the file the person saved; never opens or runs it.
+                let url = objc2_foundation::NSURL::fileURLWithPath(
+                    &objc2_foundation::NSString::from_str(&path),
+                );
+                let list = objc2_foundation::NSArray::from_retained_slice(&[url]);
+                objc2_app_kit::NSWorkspace::sharedWorkspace()
+                    .activateFileViewerSelectingURLs(&list);
+            }
             "focus" => host.set_focus(1),
             _ => return Err(format!("`{action}` is not available for Chromium views")),
         }
@@ -301,6 +345,9 @@ wrap_client! {
         }
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(HupLifeSpan::new(self.key.clone(), self.info.clone(), self.generation.clone()))
+        }
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            Some(HupDownload::new(self.key.clone(), self.info.clone(), self.generation.clone()))
         }
         fn find_handler(&self) -> Option<FindHandler> {
             Some(HupFind::new(self.key.clone(), self.info.clone(), self.generation.clone()))
@@ -417,6 +464,51 @@ wrap_find_handler! {
             if final_update != 0 {
                 report(&self.key, &self.generation, "find.result", json!({ "matches": count, "active": active_match_ordinal }));
             }
+        }
+    }
+}
+
+wrap_download_handler! {
+    struct HupDownload {
+        key: String,
+        info: Arc<Mutex<Info>>,
+        generation: Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl DownloadHandler {
+        fn can_download(&self, _browser: Option<&mut Browser>, _url: Option<&CefString>, _method: Option<&CefString>) -> i32 {
+            1
+        }
+        // The person always chooses where a download is saved (a save panel).
+        fn on_before_download(&self, _browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, suggested_name: Option<&CefString>, callback: Option<&mut BeforeDownloadCallback>) -> i32 {
+            let name = suggested_name.map(|n| n.to_string()).unwrap_or_default();
+            let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+            let suggested = home.join("Downloads").join(&name);
+            if let Some(cb) = callback {
+                cb.cont(Some(&CefString::from(suggested.to_string_lossy().as_ref())), 1);
+            }
+            let id = item.map(|i| i.id()).unwrap_or(0);
+            report(&self.key, &self.generation, "download.start", json!({ "id": id, "name": name }));
+            1
+        }
+        fn on_download_updated(&self, _browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, _callback: Option<&mut DownloadItemCallback>) {
+            let Some(item) = item else { return };
+            let id = item.id();
+            let path = CefString::from(&item.full_path()).to_string();
+            if !path.is_empty() {
+                self.info.lock().unwrap().downloads.insert(id, path.clone());
+            }
+            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| CefString::from(&item.suggested_file_name()).to_string());
+            report(&self.key, &self.generation, "download.update", json!({
+                "id": id,
+                "name": name,
+                "percent": item.percent_complete(),
+                "received": item.received_bytes(),
+                "total": item.total_bytes(),
+                "complete": item.is_complete() != 0,
+                "canceled": item.is_canceled() != 0,
+            }));
         }
     }
 }

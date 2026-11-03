@@ -163,6 +163,8 @@ impl Kind {
                 "browser.print",
                 "browser.find",
                 "browser.stopFind",
+                "browser.clearData",
+                "browser.revealDownload",
             ],
         }
     }
@@ -217,9 +219,14 @@ impl Spec {
             if kind != Kind::Web && kind != Kind::Chromium {
                 return Err("`url` is only for web views; local content uses `path`".into());
             }
+            let url = if kind == Kind::Chromium {
+                normalize_chromium_url(url)?
+            } else {
+                normalize_url(url)?
+            };
             return Ok(Spec {
                 kind,
-                source: Source::Url(normalize_url(url)?),
+                source: Source::Url(url),
                 persist,
             });
         }
@@ -330,6 +337,23 @@ pub fn normalize_url(input: &str) -> Result<String, String> {
     Ok(format!("{scheme}://{s}"))
 }
 
+/// Chromium's own pages a person may open in the browser panel. Empty: the
+/// embedded (Alloy-style) browser blocks them all. Anything else goes through
+/// [`normalize_url`].
+pub const CHROMIUM_PAGES: &[&str] = &[]; // Alloy style blocks every chrome:// page
+
+pub fn normalize_chromium_url(input: &str) -> Result<String, String> {
+    let s = input.trim();
+    if let Some(rest) = s.strip_prefix("chrome://") {
+        let page = rest.split(['/', '?', '#']).next().unwrap_or("");
+        if CHROMIUM_PAGES.contains(&page) {
+            return Ok(format!("chrome://{rest}"));
+        }
+        return Err(format!("`chrome://{page}` is not opened here"));
+    }
+    normalize_url(s)
+}
+
 fn looks_like_host(head: &str) -> bool {
     head == "localhost" || head.contains('.') || head.parse::<std::net::Ipv4Addr>().is_ok()
 }
@@ -420,6 +444,16 @@ mod tests {
         assert!(normalize_url("how to cook rice").is_err());
         assert!(normalize_url("rice").is_err());
         assert!(normalize_url("").is_err());
+    }
+
+    #[test]
+    fn chromium_pages_are_an_allowlist() {
+        assert!(normalize_chromium_url("chrome://extensions").is_err());
+        assert!(normalize_chromium_url("chrome://net-internals").is_err());
+        assert_eq!(
+            normalize_chromium_url("example.com").unwrap(),
+            "https://example.com"
+        );
     }
 
     #[test]

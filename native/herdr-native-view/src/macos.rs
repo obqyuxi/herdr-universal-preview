@@ -582,7 +582,9 @@ pub fn call(key: &str, action: &str, args: &Value) -> Result<Value, String> {
                         .get("url")
                         .and_then(Value::as_str)
                         .ok_or("browser.navigate needs { url }")?;
-                    reload = Some(json!({ "kind": "chromium", "url": crate::normalize_url(url)? }));
+                    reload = Some(
+                        json!({ "kind": "chromium", "url": crate::normalize_chromium_url(url)? }),
+                    );
                     Ok(Value::Null)
                 }
                 #[cfg(feature = "chromium")]
