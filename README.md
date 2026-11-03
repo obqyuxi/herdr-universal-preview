@@ -61,6 +61,7 @@ scripts/uninstall --purge-data   # 同时删除 DD-up 自己的浏览器资料
 ## 隐私
 
 - 浏览器资料单独存放在 `~/Library/Application Support/DD-up/Chromium`，不读取、也不改动你的 Chrome 或 Safari 资料。
+- 内嵌浏览器默认不使用 macOS 钥匙串（避免每次更新都弹窗，也不和其他基于 Chromium 的程序共用 "Chromium Safe Storage"）。Cookie 文件只靠 macOS 账户权限保护。想改用钥匙串，设置 `HUP_CHROMIUM_SYSTEM_KEYCHAIN=1`。
 - "导入 Chrome 登录"只在你点击并确认后运行。macOS 会弹出钥匙串授权，只导入 Cookie，不导入密码。全程只在本机进行，不记日志，也不上传。
 
 ## 原理

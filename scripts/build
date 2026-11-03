@@ -90,7 +90,6 @@ else
         <key>HERDR_APP_NO_SOUND</key><string>1</string>
         <key>HERDR_TELEMETRY</key><string>0</string>
         <key>HUP_CHROMIUM_PROFILE</key><string>$HUP_LOCAL/chromium-profile</string>
-        <key>HUP_CHROMIUM_MOCK_KEYCHAIN</key><string>1</string>
     "
 fi
 cat >"$app/Contents/Info.plist" <<PLIST
