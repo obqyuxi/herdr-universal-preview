@@ -4,6 +4,8 @@
 
 **2026-11-03：日用版改名为 DD-up，换上自己的图标**（D13）。旧的 Herdr Plus 已按清单卸载，DD-up 已安装到 `~/Applications/DD-up.app`，清单位于 `~/Library/Application Support/DD-up/install-manifest.json`。安装前在隔离环境里自检：13/13、7/7、Chromium 6/6；安装前后正式环境指纹不变。等用户退出官方 Herdr、打开 DD-up，并切换到 `dd-up` 布局（GUI 未经用户确认）。
 
+**2026-11-03：已开源**，见 D14。https://github.com/obqyuxi/herdr-universal-preview 。官方 issue 的草稿等用户确认后再发。
+
 
 **用户 2026-11-02 收窄范围**：只要两件事，验收以这两件事为准。
 

@@ -109,3 +109,11 @@
 - 图标：`assets/icon/logo.svg`（矢量源文件，由 Claude 设计：两块"D"形面板代表终端和预览，右侧那块抬高表示"up"），用 `scripts/make-icon`（项目内的 resvg 0.49.0 加系统 iconutil）生成 `assets/icon/AppIcon.icns`。两个文件都提交到仓库，构建时不需要 resvg。
 - 只影响日用版；开发版仍然叫 Herdr Preview Dev，用官方图标。首次运行时缺少 core 才出现的设置窗口里，内置图片和标题仍然是 Herdr，没有打补丁。
 - 签名：本机临时签名（ad-hoc），本机编译且没有隔离属性，自己使用不需要 Apple 开发者账号。发给别人下载时的签名问题留到 D12 再定。
+
+## D14 开源发布（用户授权，2026-11-03）
+
+- 公开仓库：https://github.com/obqyuxi/herdr-universal-preview（用户事先建好并设为 `origin`），Apache-2.0。只推送了 `main`。
+- 提交作者统一改为 `obqyuxi <29856194+obqyuxi@users.noreply.github.com>`，避免暴露本机用户名和主机名；改写前的本地历史保留在分支 `backup/pre-identity-20261103`（未推送）。
+- 推送前从全新 clone 按 README 完整走了一遍：bootstrap 815 s，应用补丁后 903 s，`build --daily` 完成时共 1454 s，得到 `DD-up.app`。
+- 官方规范（`CONTRIBUTING.md`、App 自带 `AGENTS.md` 的"Layouts and mods other people made"）：官方仓库里自带的 mod 和布局只接受修复；个人做的放到自己的公开仓库，加 `RECIPE.md`、`preview.png` 和 topic `herdr-layout`/`herdr-mod`；缺少 API 时提"A mod can't do this yet" issue，大的改动先在 issue 里讨论。
+- 因此不向官方提交 mod 或布局 PR。要做的是提 issue，请官方加原生视图元素，草稿见 `docs/upstream/issue-native-view.md`，等用户确认后再发。暂不打 `herdr-layout` topic：在官方 Herdr 上这些 mod 显示不出预览和浏览器，会误导别人。
