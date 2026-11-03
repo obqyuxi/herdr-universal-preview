@@ -18,7 +18,7 @@
 | `scripts/doctor` | 只读检查本机、工具链、上游、测试环境和正式安装的指纹 |
 | `scripts/bootstrap-toolchain` | 在项目内安装 Rust 1.95.0 和 Zig 0.16.0（`.local/toolchain`） |
 | `scripts/prepare-upstream` | 克隆并校验固定提交，在 `hup` 分支上应用补丁；带 `--check` 做干净应用检查，带 `--export` 导出补丁 |
-| `scripts/build` | 编译 `.work/herdr-app`，打包 `artifacts/Herdr Preview Dev.app` |
+| `scripts/build` | 编译 `.work/herdr-app`，打包 `artifacts/apps.noindex/Herdr Preview Dev.app` |
 | `scripts/dev` | 测试 core 和 App 的启停、`hc`、`app`、隔离检查与快照 |
 | `scripts/test` | 项目测试（静态检查、单元测试、补丁检查） |
 

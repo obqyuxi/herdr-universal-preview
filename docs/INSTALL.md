@@ -15,7 +15,7 @@ DD-up 是在官方 Herdr 0.1.12 上加了本项目补丁的个人构建，装在
 ## 步骤
 
 ```sh
-scripts/build --daily          # 生成 artifacts/DD-up.app
+scripts/build --daily          # 生成 artifacts/apps.noindex/DD-up.app
 scripts/install --dry-run      # 先看会新增什么
 scripts/install
 ```

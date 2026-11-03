@@ -22,7 +22,8 @@ NAME, EXE = BRAND["APP_NAME"], BRAND["APP_EXE"]
 APP_HOME = Path(os.environ.get("HUP_TARGET_HOME", HOME / ".config/herdr-app"))
 STATE = Path(os.environ.get("HUP_STATE_DIR", HOME / "Library/Application Support" / EXE))
 MANIFEST = STATE / "install-manifest.json"
-BUILT = ROOT / "artifacts" / f"{NAME}.app"
+# Built apps sit in a ".noindex" folder so Spotlight and Launchpad don't list them.
+BUILT = ROOT / "artifacts/apps.noindex" / f"{NAME}.app"
 OFFICIAL = Path("/Applications/Herdr.app")
 MODS = ["files-plus", "browser", "tabs-plus"]
 LAYOUT = BRAND["LAYOUT"]
@@ -78,9 +79,9 @@ def plan_install(app_dir: Path):
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     want = lock["herdr_app"]["tag"].lstrip("v")
     if not BUILT.exists():
-        die(f"artifacts/{NAME}.app not built: run scripts/build --daily")
+        die(f"artifacts/apps.noindex/{NAME}.app not built: run scripts/build --daily")
     if subprocess.run(["codesign", "--verify", "--deep", str(BUILT)], capture_output=True).returncode != 0:
-        die(f"artifacts/{NAME}.app fails codesign --verify")
+        die(f"artifacts/apps.noindex/{NAME}.app fails codesign --verify")
     built_ver = plistlib.loads((BUILT / "Contents/Info.plist").read_bytes()).get("CFBundleShortVersionString")
     ov = official_version()
     if ov and ov != want:
@@ -111,7 +112,9 @@ def plan_install(app_dir: Path):
 
 def copy_atomic(src: Path, dst: Path):
     dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(dst.name + f".hup-tmp-{os.getpid()}")
+    # Hidden, and keeping the suffix: a half-copied "X.app.tmp" is a plain folder to
+    # Spotlight, which then lists the helper apps inside it as separate apps.
+    tmp = dst.with_name(f".{dst.stem}.hup-tmp-{os.getpid()}{dst.suffix}")
     if tmp.exists():
         shutil.rmtree(tmp) if tmp.is_dir() else tmp.unlink()
     if src.is_dir():
@@ -121,7 +124,7 @@ def copy_atomic(src: Path, dst: Path):
         shutil.copyfile(src, tmp)
     old = None
     if dst.exists():
-        old = dst.with_name(dst.name + f".hup-old-{os.getpid()}")
+        old = dst.with_name(f".{dst.stem}.hup-old-{os.getpid()}{dst.suffix}")
         os.rename(dst, old)
     os.rename(tmp, dst)
     if old:
