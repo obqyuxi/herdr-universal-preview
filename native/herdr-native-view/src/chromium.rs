@@ -30,6 +30,8 @@ pub struct Info {
     pub can_back: bool,
     pub can_forward: bool,
     pub find: Option<(i32, i32)>,
+    /// 0..1 while a page loads (Chromium's estimate).
+    pub progress: f64,
     /// Finished or running downloads: id -> full path chosen by the person.
     pub downloads: std::collections::HashMap<u32, String>,
 }
@@ -125,6 +127,18 @@ wrap_app! {
     impl App {
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
             Some(HupBrowserProcess::new())
+        }
+        // Tests: `HUP_CHROMIUM_MOCK_KEYCHAIN=1` (set by scripts/lib/env.sh) keeps
+        // Chromium away from the login keychain. CEF's item is the shared
+        // "Chromium Safe Storage", and each rebuild has a new ad-hoc signature,
+        // so every test build would otherwise put up a keychain prompt and stall
+        // all network loads until someone answers it.
+        fn on_before_command_line_processing(&self, _process_type: Option<&CefString>, command_line: Option<&mut CommandLine>) {
+            if std::env::var_os("HUP_CHROMIUM_MOCK_KEYCHAIN").is_some_and(|v| v == "1")
+                && let Some(cl) = command_line
+            {
+                cl.append_switch(Some(&CefString::from("use-mock-keychain")));
+            }
         }
     }
 }
@@ -327,6 +341,7 @@ impl ChromiumView {
             "canGoBack": i.can_back,
             "canGoForward": i.can_forward,
             "zoomLevel": zoom,
+            "progress": i.progress,
             "find": i.find.map(|(n, a)| json!({ "matches": n, "active": a })),
             "engine": "chromium",
         })
@@ -440,6 +455,9 @@ wrap_client! {
         fn find_handler(&self) -> Option<FindHandler> {
             Some(HupFind::new(self.key.clone(), self.info.clone(), self.generation.clone()))
         }
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(HupKeys::new(self.key.clone(), self.generation.clone()))
+        }
     }
 }
 
@@ -463,6 +481,23 @@ wrap_display_handler! {
             let title = title.map(|t| t.to_string()).unwrap_or_default();
             self.info.lock().unwrap().title = title.clone();
             report(&self.key, &self.generation, "title", json!({ "title": title }));
+        }
+        fn on_loading_progress_change(&self, _browser: Option<&mut Browser>, progress: f64) {
+            self.info.lock().unwrap().progress = progress;
+            report(&self.key, &self.generation, "load.progress", json!({ "progress": progress }));
+        }
+        // The page's icon, saved as PNG in the mod's data folder so `image()` can show it.
+        fn on_favicon_urlchange(&self, browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
+            // Iterate CEF's own (borrowed) list: cef-rs's `clone()` and `*const`
+            // conversion copy the opaque handle and come back empty. Taking the
+            // wrapper is safe: a borrowed list is never freed on drop.
+            let urls: Vec<String> = icon_urls.map(|l| std::mem::take(l).into_iter().collect()).unwrap_or_default();
+            let page = self.info.lock().unwrap().url.clone();
+            let Some(icon) = urls.into_iter().find(|u| u.starts_with("https://") || u.starts_with("http://") || u.starts_with("data:image/")) else { return };
+            let Some(host) = favicon_host(&page) else { return };
+            let Some(host_api) = browser.and_then(|b| b.host()) else { return };
+            let mut cb = HupFavicon::new(self.key.clone(), self.generation.clone(), host);
+            host_api.download_image(Some(&CefString::from(icon.as_str())), 1, 64, 0, Some(&mut cb));
         }
     }
 }
@@ -598,5 +633,112 @@ wrap_download_handler! {
                 "canceled": item.is_canceled() != 0,
             }));
         }
+    }
+}
+
+/// `example.com` from `https://www.example.com/x`; only plain host names are
+/// used as file names.
+fn favicon_host(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next()?.trim_start_matches("www.").to_ascii_lowercase();
+    let ok = !host.is_empty() && host.len() < 200 && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':')) && !host.contains("..");
+    ok.then(|| host.replace(':', "_"))
+}
+
+/// Herdr's app home (same rule as herdr-app's `app_dir`).
+fn app_home() -> PathBuf {
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    env("HERDR_APP_HOME").unwrap_or_else(|| {
+        env("XDG_CONFIG_HOME")
+            .unwrap_or_else(|| env("HOME").unwrap_or_default().join(".config"))
+            .join("herdr-app")
+    })
+}
+
+wrap_download_image_callback! {
+    struct HupFavicon {
+        key: String,
+        generation: Arc<std::sync::atomic::AtomicU64>,
+        host: String,
+    }
+
+    impl DownloadImageCallback {
+        fn on_download_image_finished(&self, _image_url: Option<&CefString>, _http_status_code: i32, image: Option<&mut Image>) {
+            let Some(image) = image else { return };
+            let (mut w, mut h) = (0, 0);
+            let Some(png) = image.as_png(2.0, 1, Some(&mut w), Some(&mut h)) else { return };
+            let mut bytes = vec![0u8; png.size()];
+            if bytes.is_empty() || bytes.len() > 512 * 1024 {
+                return;
+            }
+            png.data(Some(&mut bytes), 0);
+            let rel = format!("data/browser/favicons/{}.png", self.host);
+            let path = app_home().join(&rel);
+            if let Some(dir) = path.parent()
+                && std::fs::create_dir_all(dir).is_ok()
+                && std::fs::write(&path, &bytes).is_ok()
+            {
+                report(&self.key, &self.generation, "favicon", json!({ "host": self.host, "path": rel }));
+            }
+        }
+    }
+}
+
+wrap_keyboard_handler! {
+    struct HupKeys {
+        key: String,
+        generation: Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl KeyboardHandler {
+        // Browser shortcuts while the page has the keyboard: ⌘L ⌘F ⌘R ⌘[ ⌘]
+        // ⌘= ⌘- ⌘0 go to the mod (which runs them); Esc is reported and still
+        // reaches the page.
+        fn on_pre_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: *mut u8, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
+            let Some(e) = event else { return 0 };
+            if e.type_ != KeyEventType::RAWKEYDOWN {
+                return 0;
+            }
+            const COMMAND: u32 = 1 << 7; // EVENTFLAG_COMMAND_DOWN
+            const SHIFT: u32 = 1 << 1;
+            const CONTROL: u32 = 1 << 2;
+            const ALT: u32 = 1 << 3;
+            let m = e.modifiers;
+            if e.windows_key_code == 0x1B && m & (COMMAND | CONTROL | ALT) == 0 {
+                report(&self.key, &self.generation, "key", json!({ "name": "escape" }));
+                return 0;
+            }
+            if m & COMMAND == 0 || m & (CONTROL | ALT) != 0 {
+                return 0;
+            }
+            let name = match (e.windows_key_code, m & SHIFT != 0) {
+                (0x4C, false) => "address",   // L
+                (0x46, false) => "find",      // F
+                (0x52, false) => "reload",    // R
+                (0xDB, false) => "back",      // [
+                (0xDD, false) => "forward",   // ]
+                (0xBB, _) => "zoomIn",        // = / +
+                (0xBD, false) => "zoomOut",   // -
+                (0x30, false) => "zoomReset", // 0
+                _ => return 0,
+            };
+            report(&self.key, &self.generation, "key", json!({ "name": name }));
+            1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::favicon_host;
+
+    #[test]
+    fn favicon_files_are_named_by_plain_host_only() {
+        assert_eq!(favicon_host("https://www.GitHub.com/x?y").as_deref(), Some("github.com"));
+        assert_eq!(favicon_host("http://localhost:3000/").as_deref(), Some("localhost_3000"));
+        assert_eq!(favicon_host("file:///etc/passwd"), None);
+        assert_eq!(favicon_host("https://a..b/"), None);
+        assert_eq!(favicon_host("https://evil/../../x"), Some("evil".into()));
+        assert_eq!(favicon_host("https:///"), None);
     }
 }

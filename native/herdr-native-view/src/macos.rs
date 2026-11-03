@@ -811,6 +811,7 @@ fn entry_state(e: &Entry, r: &Renderer) -> Value {
         "holes": e.host.ivars().holes.borrow().len(),
         "holeClicksReachHerdr": hole_clicks_reach_herdr(e),
         "masked": layer_masked(&e.view),
+        "shadow": e.host.ivars().shadow.borrow().as_ref().is_some_and(|sh| { let hidden: bool = unsafe { msg_send![&**sh, isHidden] }; !hidden }),
         "firstResponderInside": first,
         "content": content,
     })
@@ -1135,8 +1136,20 @@ unsafe impl RefEncode for CGPath {
     const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGPath", &[]));
 }
 
+#[repr(C)]
+pub struct CGColor {
+    _private: [u8; 0],
+}
+
+// SAFETY: CGColorRef is a pointer to the opaque struct CGColor.
+unsafe impl RefEncode for CGColor {
+    const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGColor", &[]));
+}
+
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
+    fn CGColorCreateGenericGray(gray: f64, alpha: f64) -> *mut CGColor;
+    fn CGColorRelease(color: *mut CGColor);
     fn CGPathCreateMutable() -> *mut CGPath;
     fn CGPathAddRect(path: *mut CGPath, m: *const c_void, rect: NSRect);
     fn CGPathAddRoundedRect(path: *mut CGPath, m: *const c_void, rect: NSRect, w: f64, h: f64);
@@ -1145,6 +1158,9 @@ unsafe extern "C" {
 
 pub struct HostIvars {
     holes: RefCell<Vec<Hole>>,
+    /// Soft shadow around the holes, drawn on the page (the hole itself is
+    /// masked away, so the shadow only shows outside the card).
+    shadow: RefCell<Option<Retained<AnyObject>>>,
 }
 
 define_class!(
@@ -1186,7 +1202,7 @@ define_class!(
 
 impl HoleHost {
     fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(HostIvars { holes: RefCell::new(Vec::new()) });
+        let this = Self::alloc(mtm).set_ivars(HostIvars { holes: RefCell::new(Vec::new()), shadow: RefCell::new(None) });
         let this: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         this.setWantsLayer(true);
         this
@@ -1216,6 +1232,9 @@ impl HoleHost {
         if holes.is_empty() {
             let none: Option<&AnyObject> = None;
             let _: () = unsafe { msg_send![&*layer, setMask: none] };
+            if let Some(sh) = self.ivars().shadow.borrow().as_ref() {
+                let _: () = unsafe { msg_send![&**sh, setHidden: true] };
+            }
             return;
         }
         let Some(cls) = AnyClass::get(c"CAShapeLayer") else { return };
@@ -1239,6 +1258,43 @@ impl HoleHost {
             let rule = NSString::from_str("even-odd");
             let _: () = msg_send![&*shape, setFillRule: &*rule];
             let _: () = msg_send![&*layer, setMask: &*shape];
+            CGPathRelease(path);
+            self.update_shadow(&layer, &holes, b, layer_flipped);
+        }
+    }
+
+    unsafe fn update_shadow(&self, layer: &AnyObject, holes: &[Hole], b: NSRect, layer_flipped: bool) {
+        let Some(cls) = AnyClass::get(c"CALayer") else { return };
+        let mut slot = self.ivars().shadow.borrow_mut();
+        if slot.is_none() {
+            let sh: Retained<AnyObject> = unsafe { msg_send![cls, layer] };
+            unsafe {
+                let color = CGColorCreateGenericGray(0.0, 1.0);
+                let _: () = msg_send![&*sh, setShadowColor: color.cast_const()];
+                CGColorRelease(color);
+                let _: () = msg_send![&*sh, setShadowOpacity: 0.18f32];
+                let _: () = msg_send![&*sh, setShadowRadius: 14.0f64];
+                let _: () = msg_send![&*sh, setZPosition: 1000.0f64];
+                let _: () = msg_send![layer, addSublayer: &*sh];
+            }
+            *slot = Some(sh);
+        }
+        let sh = slot.as_ref().unwrap();
+        unsafe {
+            let path = CGPathCreateMutable();
+            for h in holes {
+                let mut r = h.rect(b.size.width);
+                if !layer_flipped {
+                    r.origin.y = b.size.height - r.origin.y - r.size.height;
+                }
+                let rad = h.radius.min(r.size.width / 2.0).min(r.size.height / 2.0);
+                CGPathAddRoundedRect(path, std::ptr::null(), r, rad, rad);
+            }
+            // Down the screen: +y when the layer is flipped, -y when it isn't.
+            let _: () = msg_send![&**sh, setShadowOffset: NSSize::new(0.0, if layer_flipped { 6.0 } else { -6.0 })];
+            let _: () = msg_send![&**sh, setFrame: b];
+            let _: () = msg_send![&**sh, setShadowPath: path.cast_const()];
+            let _: () = msg_send![&**sh, setHidden: false];
             CGPathRelease(path);
         }
     }

@@ -5,7 +5,7 @@
 //
 // The ⋯ menu and its pages are small cards over the page: the host cuts a hole
 // in the page where a card is (`setHoles`), so the page stays visible around it.
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import * as herdr from "herdr";
 
@@ -40,6 +40,9 @@ const ICONS = "mods/browser/icons";
 const hasNative = () => typeof herdr.nativeView?.new === "function";
 const engine = () => (herdr.nativeViewCapabilities?.().kinds ?? []).some(k => k.kind === "chromium") ? "chromium" : "web";
 const zoomPercent = (level) => Math.round(Math.pow(1.2, level ?? 0) * 100);
+
+// Same rule as the host's favicon file names: plain host, no "www.", ":" -> "_".
+const iconKey = (url) => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.host.toLowerCase().replace(/^www\./, "").replace(":", "_") : null; } catch { return null; } };
 
 // An address, or words to search for.
 function looksLikeUrl(t) {
@@ -80,6 +83,8 @@ export default class Browser extends View {
     this.start = localStorage.getItem("browser.url") || null;
     this.history = JSON.parse(localStorage.getItem("browser.history") || "[]");
     this.searchEngine = localStorage.getItem("browser.searchEngine") || "google";
+    this.favicons = JSON.parse(localStorage.getItem("browser.favicons") || "{}");  // host -> path in the app home
+    this.progress = 0;
     this.downloads = new Map();
     this.panel = null;          // null | "home" | a key of CARDS
     this.finding = false;
@@ -109,8 +114,7 @@ export default class Browser extends View {
         if (name === "menu") this.setPanel(CARDS[this.panel] ? null : "menu");
         if (name === "panel" && (CARDS[arg] || arg === "home")) { if (arg === "import") this.importState = null; this.setPanel(arg); }
         if (name === "close") this.setPanel(null);
-        if (name === "address") this.input.focus();
-        if (name === "find" && this.start) { this.setPanel(null); this.finding = true; this.findInput.focus(); }
+        if (name === "address" || name === "find") this.onKey(name);
         if (name === "home" && this.start) this.setPanel(this.panel === "home" ? null : "home");
         cx.notify();
       }
@@ -127,7 +131,13 @@ export default class Browser extends View {
 
   onEvent(event, d) {
     if (event === "view.click" && this.panel && this.panel !== "home") this.setPanel(null);
-    if (event === "load.start") { this.loading = true; this.error = null; }
+    if (event === "key") this.onKey(d.name);
+    if (event === "load.progress") this.progress = d.progress ?? 0;
+    if (event === "favicon" && d.host && d.path && this.favicons[d.host] !== d.path) {
+      this.favicons[d.host] = d.path;
+      localStorage.setItem("browser.favicons", JSON.stringify(this.favicons));
+    }
+    if (event === "load.start") { this.loading = true; this.error = null; this.progress = 0; }
     if (event === "load.commit" || event === "load.finish") {
       if (event === "load.finish") this.loading = false;
       if (d.url) {
@@ -146,6 +156,21 @@ export default class Browser extends View {
     if (event === "download.update") this.downloads.set(d.id, { ...(this.downloads.get(d.id) ?? {}), ...d });
     if (event === "import.done") this.importState = { done: d };
     if (event === "import.error") this.importState = { error: d.message || "导入失败" };
+  }
+
+  // Shortcuts: from the page (the host reports them) or from Herdr's side of the panel.
+  onKey(name) {
+    const toHerdr = () => this.call("blur");  // the page lets go of the keyboard first
+    if (name === "address") { toHerdr(); this.setPanel(null); this.input.focus(); }
+    else if (name === "find" && this.start) { toHerdr(); this.setPanel(null); this.finding = true; this.findInput.focus(); }
+    else if (name === "escape") {
+      if (this.panel) this.setPanel(null);
+      else if (this.finding) { this.finding = false; this.find = null; this.findInput.set_value(""); this.call("browser.stopFind"); }
+    }
+    else if (name === "reload") this.call("browser.reload");
+    else if (name === "back") this.call("browser.back");
+    else if (name === "forward") this.call("browser.forward");
+    else if (name === "zoomIn" || name === "zoomOut" || name === "zoomReset") this.zoom = this.call(`browser.${name}`)?.zoomLevel ?? this.zoom;
   }
 
   remember(url, title) {
@@ -374,21 +399,31 @@ export default class Browser extends View {
     return v_flex().size_full().child(this.cardHeader(t, "历史记录"))
       .child(v_flex().id("history-list").flex_1().min_h(0).px(PAD).pb(PAD).overflow_y_scrollbar().text_size(13)
         .when(!rows.length, el => el.child(div().h(HISTORY_ROW).px(10).flex().items_center().text_color(t.dim).child("还没有浏览记录")))
-        .children(rows.map((h, i) => v_flex().id(`h-${i}`).h(HISTORY_ROW).flex_none().justify_center().px(10).rounded(7).cursor_pointer().hover(s => s.bg(t.hover))
+        .children(rows.map((h, i) => h_flex().id(`h-${i}`).h(HISTORY_ROW).flex_none().gap(10).items_center().px(10).rounded(7).cursor_pointer().hover(s => s.bg(t.hover))
           .on_click((_e, cx) => { this.input.set_value(h.url); this.go(h.url, cx); })
-          .child(div().truncate().child(h.title || h.url))
-          .child(div().truncate().text_size(11).text_color(t.dim).child(h.url)))));
+          .child(this.siteIcon(t, h.url, (iconKey(h.url) ?? "?").replace(/_\d+$/, ""), 24))
+          .child(v_flex().flex_1().min_w(0)
+            .child(div().truncate().child(h.title || h.url))
+            .child(div().truncate().text_size(11).text_color(t.dim).child(h.url))))));
+  }
+
+  // The site's own icon once the host has saved it, else its initial on a color.
+  siteIcon(t, url, host, size) {
+    const path = this.favicons[iconKey(url)];
+    if (path) return div().w(size).h(size).flex_none().rounded(size / 4).bg(t.chrome ?? t.hover).flex().items_center().justify_center()
+      .child(image(path).size(Math.round(size * 0.58)));
+    const color = TILE_COLORS[[...host].reduce((a, c) => a + c.charCodeAt(0), 0) % TILE_COLORS.length];
+    return div().w(size).h(size).flex_none().rounded(size / 4).bg(color).flex().items_center().justify_center()
+      .text_size(Math.round(size * 0.42)).font_semibold().text_color("#ffffff").child(host.charAt(0).toUpperCase());
   }
 
   // The new-tab page: frequent sites.
   homePanel(t) {
     const sites = frequentSites(this.history);
     const tile = (s, i) => {
-      const color = TILE_COLORS[[...s.host].reduce((a, c) => a + c.charCodeAt(0), 0) % TILE_COLORS.length];
       return v_flex().id(`site-${i}`).w(112).px(6).py(10).gap(8).items_center().rounded(10).cursor_pointer().hover(x => x.bg(t.hover))
         .on_click((_e, cx) => { this.input.set_value(s.url); this.go(s.url, cx); })
-        .child(div().w(48).h(48).rounded(12).bg(color).flex().items_center().justify_center()
-          .text_size(20).font_semibold().text_color("#ffffff").child(s.host.charAt(0).toUpperCase()))
+        .child(this.siteIcon(t, s.url, s.host, 48))
         .child(div().w_full().text_center().text_size(12).truncate().child(s.title));
     };
     return v_flex().id("browser-home").size_full().px(20).pt(24).pb(16).gap(10).bg(t.background)
@@ -426,8 +461,12 @@ export default class Browser extends View {
       .border_color(t.border).cursor_pointer().hover(s => s.bg(t.hover)).when(open, el => el.bg(t.hover))
       .on_click((_e, cx) => { this.setPanel(open ? null : "menu"); cx.notify(); })
       .child(this.glyph("ellipsis", 16, t.foreground));
-    const bar = h_flex().h(50).flex_none().px(8).gap(6).items_center().border_b(1).border_color(t.border)
-      .child(nav).child(address).child(more);
+    const loadingBar = this.loading && page
+      ? div().absolute().left(0).bottom(-1).h(2).w(`${Math.round(Math.max(0.08, Math.min(1, this.progress)) * 100)}%`).bg(t.accent)
+      : null;
+    const bar = h_flex().h(50).flex_none().relative().px(8).gap(6).items_center().border_b(1).border_color(t.border)
+      .child(nav).child(address).child(more)
+      .when(Boolean(loadingBar), el => el.child(loadingBar));
     const findBar = h_flex().h(40).flex_none().px(10).gap(4).items_center().border_b(1).border_color(t.border).text_size(12)
       .child(this.glyph("search", 14, t.dim))
       .child(div().flex_1().min_w(0).pl(4).child(Input.new(this.findInput).text_size(13)))
@@ -445,7 +484,16 @@ export default class Browser extends View {
     const body = div().flex_1().min_h(0).relative()
       .when(page, el => el.child(herdr.nativeView.new(ID, { kind: this.engine, url: this.start, persist: true }).child(overlay)))
       .when(!page, el => el.child(overlay));
-    return v_flex().id("browser").size_full().min_h(0).overflow_hidden().rounded(10).border_1().border_color(t.border).bg(t.background).text_color(t.foreground)
+    return v_flex().id("browser").size_full().min_h(0)
+      .on_key_down((e, cx) => {
+        const cmd = e.modifiers?.platform && !e.modifiers.control && !e.modifiers.alt;
+        if (cmd && e.key === "l") this.onKey("address");
+        else if (cmd && e.key === "f") this.onKey("find");
+        else if (e.key === "escape" && (this.panel || this.finding)) this.onKey("escape");
+        else return;
+        cx.stop_propagation();
+        cx.notify();
+      }).overflow_hidden().rounded(10).border_1().border_color(t.border).bg(t.background).text_color(t.foreground)
       .child(bar)
       .when(this.finding, el => el.child(findBar))
       .when(Boolean(status), el => el.child(status))
