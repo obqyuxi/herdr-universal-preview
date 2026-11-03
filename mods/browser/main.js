@@ -6,19 +6,20 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import * as herdr from "herdr";
 
 const ID = "browser";
-const HOME = "https://www.bing.com";
 const hasNative = () => typeof herdr.nativeView?.new === "function";
 
 export default class Browser extends View {
   init(_props, cx) {
-    this.start = localStorage.getItem("browser.url") || HOME;
+    // No default site: the first time it waits for an address; later it
+    // reopens the last page.
+    this.start = localStorage.getItem("browser.url") || null;
     this.url = this.start;
     this.title = "";
     this.error = null;
     this.loading = false;
     this.canBack = false;
     this.canForward = false;
-    this.input = InputState.new({ placeholder: "输入网址，回车打开（例如 github.com 或 localhost:3000）", value: this.start });
+    this.input = InputState.new({ placeholder: "输入网址，回车打开（例如 github.com 或 localhost:3000）", value: this.start ?? "" });
     this.input.on("submit", (_e, cx) => this.go(this.input.value(), cx));
     if (!hasNative()) return;
     cx.spawn(async (cx) => {
@@ -47,6 +48,9 @@ export default class Browser extends View {
 
   go(text, cx) {
     this.error = null;
+    if (!text.trim()) return;
+    // The first address creates the view; later ones navigate inside it.
+    if (!this.start) { this.start = text.trim(); cx.notify(); return; }
     this.call("browser.navigate", { url: text.trim() });
     this.call("focus");
     cx.notify();
@@ -70,14 +74,15 @@ export default class Browser extends View {
       .child(this.button(t, "b-fwd", "→", this.canForward, () => this.call("browser.forward")))
       .child(this.button(t, "b-reload", this.loading ? "✕" : "↻", true, () => this.call(this.loading ? "browser.stop" : "browser.reload")))
       .child(div().flex_1().min_w(0).child(Input.new(this.input)));
-    const status = (this.error || this.title)
-      ? div().px(10).py(3).flex_none().text_size(11).truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? `打不开：${this.error}` : this.title)
+    // Only a problem gets a line; the page title stays on the page.
+    const status = this.error
+      ? div().px(10).py(3).flex_none().text_size(11).truncate().text_color(t.blocked).child(`打不开：${this.error}`)
       : null;
     return v_flex().id("browser").size_full().min_h(0).overflow_hidden().rounded(10).border_1().border_color(t.border).bg(t.background).text_color(t.foreground)
       .child(bar)
       .when(Boolean(status), el => el.child(status))
       .child(div().flex_1().min_h(0).relative()
-        .child(herdr.nativeView.new(ID, { kind: "web", url: this.start, persist: true })
-          .child(div().p(12).text_color(t.dim).text_size(12).child("正在打开…（菜单或对话框打开时网页会暂时让开）"))));
+        .when(!this.start, el => el.child(div().p(16).text_color(t.dim).text_size(13).child("在上面输入网址，回车打开")))
+        .when(Boolean(this.start), el => el.child(herdr.nativeView.new(ID, { kind: "web", url: this.start, persist: true }))));
   }
 }
