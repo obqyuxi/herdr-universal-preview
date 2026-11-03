@@ -7,7 +7,7 @@ case ${1:-} in
   -h|--help) cat <<USAGE
 Usage: scripts/install [--dry-run] [--app-dir DIR]
 
-  Build first: scripts/build --daily (artifacts/<APP_NAME>.app).
+  Build first: scripts/build --daily (artifacts/apps.noindex/<APP_NAME>.app).
   Adds  DIR/<APP_NAME>.app (default ~/Applications),
         ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus},
         ~/.config/herdr-app/layouts/<LAYOUT>.json

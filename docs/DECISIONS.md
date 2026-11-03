@@ -117,3 +117,14 @@
 - 推送前从全新 clone 按 README 完整走了一遍：bootstrap 815 s，应用补丁后 903 s，`build --daily` 完成时共 1454 s，得到 `DD-up.app`。
 - 官方规范（`CONTRIBUTING.md`、App 自带 `AGENTS.md` 的"Layouts and mods other people made"）：官方仓库里自带的 mod 和布局只接受修复；个人做的放到自己的公开仓库，加 `RECIPE.md`、`preview.png` 和 topic `herdr-layout`/`herdr-mod`；缺少 API 时提"A mod can't do this yet" issue，大的改动先在 issue 里讨论。
 - 因此不向官方提交 mod 或布局 PR，而是提 issue 请官方加原生视图元素：已发布为 https://github.com/herdrdev/herdr-app/issues/425（obqyuxi，2026-11-03，正文即 `docs/upstream/issue-native-view.md`）。暂不打 `herdr-layout` topic：在官方 Herdr 上这些 mod 显示不出预览和浏览器，会误导别人。
+
+## D15 应用列表里出现多个 DD-up（2026-11-03 修复）
+
+- 现象：用户的"应用程序"列表里出现 4 个 DD-up。分别是安装好的 DD-up.app、仓库里 `artifacts/DD-up.app` 这份构建产物，以及 `DD-up Helper (GPU)` 和 `DD-up Helper (Plugin)` 两个辅助程序。
+- 原因：
+  1. 安装时先复制到临时名 `DD-up.app.hup-tmp-<pid>`。这个名字没有 `.app` 后缀，Spotlight 把它当成普通文件夹建索引，于是把里面的 Helper 当成独立应用收录；改名之后，这些索引仍然留着。
+  2. `artifacts/` 位于 Documents 之下，构建产物同样会被收录。
+- 修复：
+  1. 临时名和旧版本名改为隐藏且保留后缀（`.DD-up.hup-tmp-<pid>.app`）。
+  2. 构建产物统一放进 `artifacts/apps.noindex/`，Spotlight 不索引 `.noindex` 目录。
+  3. 用 `lsregister -u` 注销旧路径和辅助程序的注册，然后重新安装。之后 Spotlight 和 LaunchServices 里都只剩 `~/Applications/DD-up.app`。

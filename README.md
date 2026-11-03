@@ -36,7 +36,7 @@ DD-up 是在官方 Herdr 上加了一个小扩展的个人构建：在 Herdr 主
 git clone https://github.com/obqyuxi/herdr-universal-preview && cd herdr-universal-preview
 scripts/bootstrap-toolchain   # Rust 1.95.0、Zig 0.16.0、cmake/ninja、CEF 156（约 1–2 GB 下载）
 scripts/prepare-upstream      # 克隆 herdr-app v0.1.12，应用 patches/herdr-app
-scripts/build --daily         # 编译并打包 artifacts/DD-up.app
+scripts/build --daily         # 编译并打包 artifacts/apps.noindex/DD-up.app
 scripts/install --dry-run     # 先看会新增什么
 scripts/install
 ```

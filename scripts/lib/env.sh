@@ -28,7 +28,8 @@ HUP_LOGS=$HUP_LOCAL/logs
 HUP_RUN=$HUP_LOCAL/run                       # pid files of processes this project started
 HUP_WORK=$HUP_ROOT/.work
 HUP_UPSTREAM=$HUP_WORK/herdr-app
-HUP_DEV_APP="$HUP_ROOT/artifacts/Herdr Preview Dev.app"
+HUP_APPS=$HUP_ROOT/artifacts/apps.noindex          # ".noindex": Spotlight/Launchpad skip built apps
+HUP_DEV_APP="$HUP_APPS/Herdr Preview Dev.app"
 HUP_DEV_EXE="$HUP_DEV_APP/Contents/MacOS/HerdrPreviewDev"
 
 # Official locations: read-only observation targets, never written.
