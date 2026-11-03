@@ -20,6 +20,15 @@
   "toolchain": {
     "rust": "1.95.0",
     "zig": "0.16.0",
-    "source": "herdr-app README 'Build from source' (v0.1.12)"
+    "source": "herdr-app README 'Build from source' (v0.1.12)",
+    "cmake": "4.4.4",
+    "ninja": "1.13.2"
+  },
+  "cef": {
+    "repo": "https://github.com/tauri-apps/cef-rs",
+    "tag": "export-cef-dir-v156.3.0+156.0.15",
+    "commit": "224a785c7b41758b51821cbb7395ea57ba493a63",
+    "cef_version": "156.0.15",
+    "note": "export-cef-dir downloads the CEF binary distribution into .local/cef (CEF_PATH)"
   }
 }
