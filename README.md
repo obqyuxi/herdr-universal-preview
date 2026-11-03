@@ -33,7 +33,7 @@ DD-up 是在官方 Herdr 上加了一个小扩展的个人构建：在 Herdr 主
 需要 macOS（Apple Silicon）、Command Line Tools（`xcode-select --install`）、[uv](https://docs.astral.sh/uv/)、git，以及已安装并打开过一次的官方 Herdr 0.1.12。工具链全部装在仓库内的 `.local/`，不修改全局环境。
 
 ```sh
-git clone https://github.com/luojimei/dd-up && cd dd-up
+git clone https://github.com/obqyuxi/herdr-universal-preview && cd herdr-universal-preview
 scripts/bootstrap-toolchain   # Rust 1.95.0、Zig 0.16.0、cmake/ninja、CEF 156（约 1–2 GB 下载）
 scripts/prepare-upstream      # 克隆 herdr-app v0.1.12，应用 patches/herdr-app
 scripts/build --daily         # 编译并打包 artifacts/DD-up.app
