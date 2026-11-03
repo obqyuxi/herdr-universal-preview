@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Rebuild the herdr-app work copy from the pinned commit plus this repo's patches.
+# Source of truth: upstream.lock.json + patches/herdr-app/*.patch (+ native/).
+# The work copy (.work/herdr-app) is disposable; patches are applied as commits
+# on branch "hup" so uncommitted edits there are always real, unexported work.
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+
+usage() {
+  cat <<EOF
+Usage: scripts/prepare-upstream [--check] [--no-patches] [--export] [--dir DIR]
+
+  (default)     clone if missing, verify the pinned commit, rebuild branch "hup"
+                from it + patches/herdr-app/*.patch (refuses if the work copy
+                has uncommitted changes or unexported commits)
+  --check       clone a fresh temporary tree and verify every patch applies
+  --no-patches  check out the pinned commit only (baseline builds)
+  --export      write commits on "hup" since the pinned commit to
+                patches/herdr-app/ (replaces the patch files there)
+  --dir DIR     work copy location (default: $HUP_UPSTREAM)
+EOF
+}
+
+check=0 patches=1 export=0 dir=$HUP_UPSTREAM
+while (($#)); do
+  case $1 in
+    -h|--help) usage; exit 0 ;;
+    --check) check=1 ;;
+    --no-patches) patches=0 ;;
+    --export) export=1 ;;
+    --dir) shift; [[ $# -gt 0 ]] || hup_die "--dir needs a value"; dir=$1 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+lock() { /usr/bin/python3 -c "import json;d=json.load(open('$HUP_ROOT/upstream.lock.json'))['herdr_app'];print(d['$1'])"; }
+REPO=$(lock repo); TAG=$(lock tag); COMMIT=$(lock commit)
+PATCHES=$HUP_ROOT/patches/herdr-app
+g() { git -C "$dir" "$@"; }
+is_our_clone() { [[ -d $1/.git ]] && [[ $(git -C "$1" remote get-url origin 2>/dev/null) == "$REPO"* ]]; }
+dirty() { [[ -n $(g status --porcelain --ignore-submodules=all) ]]; }
+
+if (( export )); then
+  is_our_clone "$dir" || hup_die "no work copy at $dir"
+  [[ $(g rev-parse --abbrev-ref HEAD) == hup ]] || hup_die "work copy is not on branch hup"
+  dirty && hup_die "commit your work-copy changes first (git -C $dir status)"
+  mkdir -p "$PATCHES"
+  rm -f "$PATCHES"/*.patch
+  g format-patch --quiet --no-signature --zero-commit --no-stat -o "$PATCHES" "$COMMIT..hup"
+  ls "$PATCHES"
+  exit 0
+fi
+
+if (( check )); then
+  mkdir -p "$HUP_WORK"
+  dir=$(mktemp -d "$HUP_WORK/check.XXXX"); trap 'rm -rf "$dir"' EXIT
+  rmdir "$dir"
+fi
+
+if [[ ! -d $dir/.git ]]; then
+  [[ ! -e $dir || -z $(ls -A "$dir") ]] || hup_die "$dir exists and is not a git clone"
+  mkdir -p "$(dirname "$dir")"
+  git -c advice.detachedHead=false clone --quiet --branch "$TAG" --depth 1 "$REPO" "$dir"
+fi
+is_our_clone "$dir" || hup_die "$dir origin is not $REPO"
+# Identity for patch commits, local to the work copy only.
+g config user.name "herdr-universal-preview"
+g config user.email "hup@localhost"
+
+if [[ $(g rev-parse --abbrev-ref HEAD) == hup ]] && (( ! check )); then
+  dirty && hup_die "work copy has uncommitted changes; commit and --export them first"
+  # Unexported commits would be lost when the branch is rebuilt.
+  ours=$(g rev-list --count "$COMMIT..hup")
+  shopt -s nullglob; pl=("$PATCHES"/*.patch); want=${#pl[@]}; shopt -u nullglob
+  [[ $ours -le $want ]] || hup_die "branch hup has $ours commits but $want patch files; run --export first"
+fi
+
+g cat-file -e "$COMMIT^{commit}" 2>/dev/null || g fetch --quiet --depth 1 origin "$COMMIT"
+g -c advice.detachedHead=false checkout --quiet --force --detach "$COMMIT"
+(( check )) || g submodule update --init --depth 1 --quiet
+[[ $(g rev-parse HEAD) == "$COMMIT" ]] || hup_die "HEAD is not $COMMIT"
+echo "herdr-app $TAG at $COMMIT"
+g submodule status | sed 's/^/  submodule /'
+
+(( patches )) || exit 0
+g checkout --quiet -B hup "$COMMIT"
+shopt -s nullglob
+list=("$PATCHES"/*.patch)
+for p in ${list[@]+"${list[@]}"}; do
+  g am --quiet --keep-cr --committer-date-is-author-date "$p" || { g am --abort || true; hup_die "patch does not apply: ${p#"$HUP_ROOT"/}"; }
+  echo "  applied ${p#"$HUP_ROOT"/}"
+done
+echo "${#list[@]} patch(es) applied on branch hup in $dir"

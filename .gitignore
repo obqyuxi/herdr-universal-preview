@@ -1,0 +1,13 @@
+# Build work copies, isolated test homes/cores/toolchains, evidence artifacts
+/.work/
+/.local/
+/artifacts/
+target/
+*.log
+.DS_Store
+# Browser profiles / caches should never be committed
+**/webkit-profile/
+**/cache/
+# Python
+__pycache__/
+.venv/

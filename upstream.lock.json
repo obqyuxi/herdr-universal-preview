@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "project_interface": "native-view/0",
+  "herdr_app": {
+    "repo": "https://github.com/herdrdev/herdr-app",
+    "tag": "v0.1.12",
+    "commit": "4aa3460749947e7771aa39a8a2cec58d46649926",
+    "license": "Apache-2.0",
+    "submodules": {
+      "vendor/ghostty": "291fd050b9e9c293c8adb6a140742649b7e42d3a"
+    }
+  },
+  "herdr_core": {
+    "repo": "https://github.com/herdrdev/herdr-core",
+    "version": "0.1.17",
+    "license": "Apache-2.0",
+    "test_binary": ".local/bin/hc (copy of the installed ~/.local/bin/herdr-core)",
+    "sha256": "b0ad77ab78ca8d9a8b7fb2ddd02c6f23fcbd1fa6cd2dafd39574adb71e96fc4a"
+  },
+  "toolchain": {
+    "rust": "1.95.0",
+    "zig": "0.16.0",
+    "source": "herdr-app README 'Build from source' (v0.1.12)"
+  }
+}

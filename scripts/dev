@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Run and inspect the isolated test environment: its own herdr-core session,
+# XDG state/config, app home and (later) the Herdr Preview Dev app.
+# Never starts, stops or writes the official Herdr app or core.
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+
+usage() {
+  cat <<EOF
+Usage: scripts/dev <command> [args]
+
+Core (session "$HUP_SESSION", state under $HUP_SHORT -> .local):
+  core-install        copy the installed herdr-core into .local/bin/hc (records sha256)
+  core-up             start the test core and print its identity
+  core-down           stop the test core (only after verifying it is ours)
+  hc <args...>        run the test hc with the isolated environment
+  isolation-check     start the test core, prove it is separate from the
+                      official one, stop it, write artifacts/isolation-*.json
+
+App (Herdr Preview Dev):
+  app-up [layout]     start the dev app (isolated home, core and session)
+  app-down            stop the dev app this project started
+  app <args...>       run the dev app CLI (status, do, check, ls ...) against the test home
+
+Other:
+  status              test core / dev app state plus an official-environment snapshot
+  snapshot [file]     read-only snapshot of the official environment (JSON lines)
+EOF
+}
+
+cmd=${1:-}; [[ -n $cmd ]] || { usage >&2; exit 2; }; shift || true
+
+ours_pid() { # pid -> 0 if its environment carries our session and app home
+  local pid=$1
+  [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null || return 1
+  ps eww -o command= -p "$pid" 2>/dev/null | tr ' ' '\n' | grep -qx "HC_SESSION=$HUP_SESSION"
+}
+
+core_status_json() { hup_hc server status --json 2>/dev/null; }
+
+core_install() {
+  local src
+  src=$(cd "$(dirname "$OFFICIAL_HC")" && /usr/bin/python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$OFFICIAL_HC")
+  [[ -x $src ]] || hup_die "no installed herdr-core at $src"
+  mkdir -p "$HUP_BIN"
+  cp -p "$src" "$HUP_BIN/herdr-core"
+  ln -sf herdr-core "$HUP_BIN/hc"
+  local sum ver
+  sum=$(shasum -a 256 "$HUP_BIN/herdr-core" | awk '{print $1}')
+  ver=$("$HUP_BIN/hc" --version | awk '{print $2}')
+  /usr/bin/python3 - "$HUP_ROOT/upstream.lock.json" "$sum" "$ver" <<'PY'
+import json,sys
+p,s,v=sys.argv[1:]
+d=json.load(open(p)); d["herdr_core"]["sha256"]=s; d["herdr_core"]["version"]=v
+open(p,"w").write(json.dumps(d,indent=2,ensure_ascii=False)+"\n")
+PY
+  echo "test core: $HUP_BIN/hc ($ver, sha256 ${sum:0:16}…) copied from $src"
+}
+
+core_up() {
+  hup_ensure_short_link; hup_isolate
+  "$HUP_HC" server start --json >/dev/null 2>"$HUP_LOGS/core-start.err" || { cat "$HUP_LOGS/core-start.err" >&2; hup_die "test core did not start"; }
+  local st pid
+  st=$(core_status_json) || hup_die "test core does not answer"
+  pid=$(/usr/bin/python3 -c 'import json,sys;print(json.loads(sys.argv[1])["pid"])' "$st")
+  echo "$pid" >"$HUP_RUN/core.pid"
+  echo "$st"
+}
+
+core_down() {
+  hup_isolate
+  local pid
+  pid=$(cat "$HUP_RUN/core.pid" 2>/dev/null || true)
+  if ! core_status_json >/dev/null; then echo "test core not running"; rm -f "$HUP_RUN/core.pid"; return 0; fi
+  local live
+  live=$(/usr/bin/python3 -c 'import json,sys;print(json.loads(sys.argv[1])["pid"])' "$(core_status_json)")
+  [[ -z $pid || $pid == "$live" ]] || hup_die "test core pid $live differs from recorded $pid; inspect manually"
+  ours_pid "$live" || hup_die "pid $live does not carry HC_SESSION=$HUP_SESSION; refusing to stop it"
+  "$HUP_HC" server stop >/dev/null
+  for _ in $(seq 50); do kill -0 "$live" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$live" 2>/dev/null && hup_die "test core $live still running after stop"
+  rm -f "$HUP_RUN/core.pid"
+  echo "test core $live stopped"
+}
+
+isolation_check() {
+  local out=$HUP_ROOT/artifacts
+  mkdir -p "$out"
+  hup_official_snapshot >"$out/isolation-official-before.jsonl"
+  local test_st; test_st=$(core_up)
+  echo "$test_st" >"$out/isolation-test-core.json"
+  hup_isolate
+  # A marker terminal in the test core.
+  "$HUP_HC" run --bg --no-parent --name hup-isolation-marker --json -- /bin/sh -c 'echo hup-marker; sleep 30' >"$out/isolation-test-run.json"
+  "$HUP_HC" ls --json >"$out/isolation-test-ls.json"
+  ls -la "$HUP_LOCAL/state/herdr-core" >"$out/isolation-test-state-dirs.txt" 2>&1
+  ls -la "$HUP_LOCAL/state/herdr-core/$HUP_SESSION" >>"$out/isolation-test-state-dirs.txt" 2>&1
+  launchctl list 2>/dev/null | awk '/herdr/{print $3}' >"$out/isolation-launchd-during.txt"
+  (
+    unset HC_SOCKET HC_SESSION XDG_STATE_HOME XDG_CONFIG_HOME HERDR_APP_HOME HERDR_CORE_DIRS
+    "$OFFICIAL_HC" ls --json >"$out/isolation-official-ls-during.json" 2>&1 || true
+  )
+  hup_official_snapshot >"$out/isolation-official-during.jsonl"
+  "$HUP_HC" kill hup-isolation-marker >/dev/null 2>&1 || true
+  core_down >"$out/isolation-core-down.txt"
+  hup_official_snapshot >"$out/isolation-official-after.jsonl"
+  /usr/bin/python3 - "$out" "$HUP_SESSION" <<'PY'
+import json,sys,os
+out,session=sys.argv[1:]
+def jl(n): return [json.loads(l) for l in open(os.path.join(out,n)) if l.strip()]
+before,during,after=jl("isolation-official-before.jsonl"),jl("isolation-official-during.jsonl"),jl("isolation-official-after.jsonl")
+test=json.load(open(os.path.join(out,"isolation-test-core.json")))
+off=json.load(open(os.path.join(out,"isolation-official-ls-during.json")))
+names=lambda ls:[t.get("name") for t in (ls if isinstance(ls,list) else ls.get("terminals",[]))]
+tls=json.load(open(os.path.join(out,"isolation-test-ls.json")))
+oc=before[0]["official_core"]
+checks={
+ "test_core_id_differs": test["core"]["id"]!=oc["id"],
+ "test_core_pid_differs": test["pid"]!=oc["pid"],
+ "marker_in_test_ls": "hup-isolation-marker" in names(tls),
+ "marker_absent_from_official_ls": "hup-isolation-marker" not in names(off),
+ "official_unchanged_during": before[1:]==during[1:] and during[0]["official_core"]["id"]==oc["id"] and during[0]["official_core"]["pid"]==oc["pid"],
+ "official_unchanged_after": before[1:]==after[1:] and after[0]["official_core"]["id"]==oc["id"] and after[0]["official_core"]["pid"]==oc["pid"],
+ "official_live_before_after": [oc["live"], after[0]["official_core"]["live"]],
+}
+res={"session":session,"official_core":oc,"test_core":{"id":test["core"]["id"],"pid":test["pid"],"version":test["version"]},"checks":checks}
+json.dump(res,open(os.path.join(out,"isolation-result.json"),"w"),indent=2)
+print(json.dumps(res,indent=2))
+ok=all(v for k,v in checks.items() if k!="official_live_before_after")
+sys.exit(0 if ok else 1)
+PY
+}
+
+app_env() {
+  hup_ensure_short_link; hup_isolate
+  [[ -x $HUP_DEV_EXE ]] || hup_die "dev app not built: $HUP_DEV_EXE (run scripts/build)"
+  core_status_json >/dev/null || core_up >/dev/null
+}
+
+app_up() {
+  app_env
+  local pid
+  pid=$(cat "$HUP_RUN/app.pid" 2>/dev/null || true)
+  if [[ -n $pid ]] && ours_pid "$pid"; then echo "dev app already running (pid $pid)"; return 0; fi
+  if [[ -n ${1:-} ]]; then
+    [[ -f $HUP_APP_HOME/layouts/$1.json ]] || hup_die "no layout $1 in $HUP_APP_HOME/layouts"
+  fi
+  # Links the app asks to open are logged, not opened (like upstream scripts/sandbox).
+  mkdir -p "$HUP_LOCAL/shim"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>%q\n' "$HUP_LOGS/opened.log" >"$HUP_LOCAL/shim/open"
+  chmod +x "$HUP_LOCAL/shim/open"
+  PATH=$HUP_LOCAL/shim:$PATH nohup "$HUP_DEV_EXE" >"$HUP_LOGS/app.log" 2>&1 </dev/null &
+  pid=$!
+  echo "$pid" >"$HUP_RUN/app.pid"
+  for _ in $(seq 100); do
+    "$HUP_DEV_EXE" status >/dev/null 2>&1 && { echo "dev app up (pid $pid, log $HUP_LOGS/app.log)"; break; }
+    kill -0 "$pid" 2>/dev/null || { tail -20 "$HUP_LOGS/app.log" >&2; hup_die "dev app exited"; }
+    sleep 0.2
+  done
+  if [[ -n ${1:-} ]]; then "$HUP_DEV_EXE" do app.layout "{\"name\":\"$1\"}" || true; fi
+}
+
+app_down() {
+  hup_isolate
+  local pid
+  pid=$(cat "$HUP_RUN/app.pid" 2>/dev/null || true)
+  [[ -n $pid ]] || { echo "dev app not started by this project"; return 0; }
+  if ! kill -0 "$pid" 2>/dev/null; then echo "dev app $pid already gone"; rm -f "$HUP_RUN/app.pid"; return 0; fi
+  ours_pid "$pid" || hup_die "pid $pid is not our dev app; refusing to stop it"
+  [[ $(ps -o comm= -p "$pid") == *HerdrPreviewDev* ]] || hup_die "pid $pid is not HerdrPreviewDev"
+  kill "$pid"
+  for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$pid" 2>/dev/null && hup_die "dev app $pid did not exit"
+  rm -f "$HUP_RUN/app.pid"
+  echo "dev app $pid stopped"
+}
+
+case $cmd in
+  -h|--help|help) usage ;;
+  core-install) core_install ;;
+  core-up) core_up ;;
+  core-down) core_down ;;
+  hc) hup_ensure_short_link; hup_isolate; hup_hc "$@" ;;
+  isolation-check) isolation_check ;;
+  app-up) app_up "${1:-}" ;;
+  app-down) app_down ;;
+  app) app_env; "$HUP_DEV_EXE" "$@" ;;
+  status)
+    hup_ensure_short_link; hup_isolate
+    echo "test core: $(core_status_json || echo 'not running')"
+    pid=$(cat "$HUP_RUN/app.pid" 2>/dev/null || true)
+    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then echo "dev app: pid $pid"; else echo "dev app: not running"; fi
+    echo "official:"; hup_official_snapshot | sed 's/^/  /'
+    ;;
+  snapshot) if [[ -n ${1:-} ]]; then hup_official_snapshot >"$1"; else hup_official_snapshot; fi ;;
+  *) usage >&2; exit 2 ;;
+esac
