@@ -1,5 +1,5 @@
 <!--
-Proposal for herdrdev/herdr-app, template "A mod can't do this yet" (.github/ISSUE_TEMPLATE/mod-api.yml).
+Posted as herdrdev/herdr-app#425 (2026-11-03). Template "A mod can't do this yet" (.github/ISSUE_TEMPLATE/mod-api.yml).
 Title below; the two headings are the template fields.
 -->
 
