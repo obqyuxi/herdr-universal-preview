@@ -116,4 +116,4 @@
 - 提交作者统一改为 `obqyuxi <29856194+obqyuxi@users.noreply.github.com>`，避免暴露本机用户名和主机名；改写前的本地历史保留在分支 `backup/pre-identity-20261103`（未推送）。
 - 推送前从全新 clone 按 README 完整走了一遍：bootstrap 815 s，应用补丁后 903 s，`build --daily` 完成时共 1454 s，得到 `DD-up.app`。
 - 官方规范（`CONTRIBUTING.md`、App 自带 `AGENTS.md` 的"Layouts and mods other people made"）：官方仓库里自带的 mod 和布局只接受修复；个人做的放到自己的公开仓库，加 `RECIPE.md`、`preview.png` 和 topic `herdr-layout`/`herdr-mod`；缺少 API 时提"A mod can't do this yet" issue，大的改动先在 issue 里讨论。
-- 因此不向官方提交 mod 或布局 PR。要做的是提 issue，请官方加原生视图元素，草稿见 `docs/upstream/issue-native-view.md`，等用户确认后再发。暂不打 `herdr-layout` topic：在官方 Herdr 上这些 mod 显示不出预览和浏览器，会误导别人。
+- 因此不向官方提交 mod 或布局 PR，而是提 issue 请官方加原生视图元素：已发布为 https://github.com/herdrdev/herdr-app/issues/425（obqyuxi，2026-11-03，正文即 `docs/upstream/issue-native-view.md`）。暂不打 `herdr-layout` topic：在官方 Herdr 上这些 mod 显示不出预览和浏览器，会误导别人。
