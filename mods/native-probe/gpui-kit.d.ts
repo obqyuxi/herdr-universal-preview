@@ -1435,7 +1435,7 @@ declare module "gpui-kit" {
     /** Sets the width. */
     w<Self extends Element>(this: Self, value: Length): Self;
 
-    // The 3146 no-argument style methods, generated from GPUI's reflection
+    // The 3148 no-argument style methods, generated from GPUI's reflection
     // table. A name here is a name the runtime dispatches, and the
     // documentation is GPUI's own.
     /**
@@ -2916,6 +2916,10 @@ declare module "gpui-kit" {
      * [Docs](https://tailwindcss.com/docs/cursor)
      */
     cursor_w_resize<Self extends Element>(this: Self): Self;
+    /** Draws a debug border around this element. */
+    debug<Self extends Element>(this: Self): Self;
+    /** Draws a debug border on all conforming elements below this element. */
+    debug_below<Self extends Element>(this: Self): Self;
     debug_blue<Self extends Element>(this: Self): Self;
     debug_green<Self extends Element>(this: Self): Self;
     debug_pink<Self extends Element>(this: Self): Self;
@@ -22601,6 +22605,26 @@ declare module "herdr" {
    * Watch what you show, not a whole home folder (node_modules is a lot of events).
    */
   export function watchFolder(path: string): Promise<string[]>;
+
+  /** HUP (Herdr Preview Dev, interface native-view/0): where a native view's content comes from.
+   *  Web: `url` (http/https; `localhost:3000` style input is normalized, never searched) or a local
+   *  HTML `path` (absolute; `trust` "static" disables page scripts, "interactive" allows them; `root`
+   *  bounds which sibling files it may read, default its folder). pdf / media / quicklook: `path`. */
+  export interface NativeViewProps { kind: "web" | "pdf" | "media" | "quicklook"; url?: string; path?: string; trust?: "static" | "interactive"; root?: string }
+  /** HUP: a real macOS view (WKWebView, PDFView, AVPlayerView, QLPreviewView) placed where this element
+   *  is drawn, inside the window. Children draw underneath (shown while it loads or steps aside for a
+   *  menu or dialog). Same id + same props keeps the view; new props load into it. Not on stock Herdr:
+   *  probe with `import * as herdr from "herdr"; if (herdr.nativeView) herdr.nativeView.new(id, props)`. */
+  export const nativeView: { new: (id: string, props: NativeViewProps) => import("gpui-kit").NativeElement };
+  /** HUP: `{ interface: "native-view/0", available, kinds: [{ kind, actions }] }`. */
+  export function nativeViewCapabilities(): { interface: string; platform: string; available: boolean; kinds: { kind: string; actions: string[] }[] };
+  /** HUP: one whitelisted action on this mod's view `id` (see capabilities), e.g. ("v", "pdf.goToPage", { page: 2 }),
+   *  ("v", "media.pause"), ("v", "browser.navigate", { url }), ("v", "state"). Throws on unknown actions. */
+  export function nativeViewCall(id: string, action: string, args?: Record<string, unknown>): unknown;
+  /** HUP: the next event from this mod's native views, as JSON text:
+   *  `{ id, generation, event, data }` (load.start/commit/finish/error, pdf.page, media.paused, view.created/disposed …).
+   *  `generation` grows with every load, so drop events older than the view's current one. */
+  export function nextNativeViewEvent(): Promise<string>;
 }
 
 /**
