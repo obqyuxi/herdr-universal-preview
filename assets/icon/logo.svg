@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- DD-up app icon. Two "D" panes (terminal + preview); the right one rises ("up").
+       macOS grid: 824px rounded square at 100,100 inside a 1024 canvas. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2A2F6E"/>
+      <stop offset="1" stop-color="#0C0F24"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.14"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5BF2C2"/>
+      <stop offset="1" stop-color="#1FA8F0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="22" flood-color="#3FD6E0" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="3"/>
+  <!-- D = stem 80 + bowl radius 180, stroke 64; 260 x 360 -->
+  <path fill="#F4F6FF" fill-rule="evenodd"
+        d="M234 372 H314 A180 180 0 0 1 314 732 H234 Z
+           M298 436 H314 A116 116 0 0 1 314 668 H298 Z"/>
+  <g filter="url(#glow)">
+    <path fill="url(#accent)" fill-rule="evenodd"
+          d="M530 292 H610 A180 180 0 0 1 610 652 H530 Z
+             M594 356 H610 A116 116 0 0 1 610 588 H594 Z"/>
+  </g>
+</svg>

@@ -1,12 +1,12 @@
-"""Install / uninstall Herdr Plus for everyday use (used by scripts/install,
-scripts/uninstall, scripts/rollback).
+"""Install / uninstall the everyday edition (named in brand.env, e.g. DD-up)
+(used by scripts/install, scripts/uninstall, scripts/rollback).
 
 Adds, never overwrites what isn't ours:
-  <app dir>/Herdr Plus.app
+  <app dir>/<APP_NAME>.app
   ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus}
-  ~/.config/herdr-app/layouts/herdr-plus.json
+  ~/.config/herdr-app/layouts/<LAYOUT>.json
 Records each with a content fingerprint in
-  ~/Library/Application Support/HerdrPlus/install-manifest.json
+  ~/Library/Application Support/<APP_EXE>/install-manifest.json
 Uninstall removes only manifest entries whose fingerprint is unchanged.
 The official /Applications/Herdr.app, its built-in mods and layouts, the
 workspaces, terminals and agent sessions are never touched.
@@ -16,13 +16,16 @@ from pathlib import Path
 
 HOME = Path.home()
 ROOT = Path(__file__).resolve().parents[2]
+BRAND = dict(l.split("=", 1) for l in (ROOT / "brand.env").read_text().splitlines() if l and not l.startswith("#"))
+BRAND = {k: v.strip().strip('"') for k, v in BRAND.items()}
+NAME, EXE = BRAND["APP_NAME"], BRAND["APP_EXE"]
 APP_HOME = Path(os.environ.get("HUP_TARGET_HOME", HOME / ".config/herdr-app"))
-STATE = Path(os.environ.get("HUP_STATE_DIR", HOME / "Library/Application Support/HerdrPlus"))
+STATE = Path(os.environ.get("HUP_STATE_DIR", HOME / "Library/Application Support" / EXE))
 MANIFEST = STATE / "install-manifest.json"
-BUILT = ROOT / "artifacts/Herdr Plus.app"
+BUILT = ROOT / "artifacts" / f"{NAME}.app"
 OFFICIAL = Path("/Applications/Herdr.app")
 MODS = ["files-plus", "browser", "tabs-plus"]
-LAYOUT = "herdr-plus"
+LAYOUT = BRAND["LAYOUT"]
 
 
 def fingerprint(p: Path) -> str:
@@ -55,8 +58,8 @@ def load_manifest():
 
 def running(app: Path) -> list:
     out = subprocess.run(["ps", "-axo", "pid=,comm="], capture_output=True, text=True).stdout
-    exe = str(app / "Contents/MacOS/HerdrPlus")
-    return [l.split()[0] for l in out.splitlines() if exe in l or l.strip().endswith("/HerdrPlus")]
+    exe = str(app / "Contents/MacOS" / EXE)
+    return [l.split()[0] for l in out.splitlines() if exe in l or l.strip().endswith("/" + EXE)]
 
 
 def official_version():
@@ -75,18 +78,18 @@ def plan_install(app_dir: Path):
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     want = lock["herdr_app"]["tag"].lstrip("v")
     if not BUILT.exists():
-        die("artifacts/Herdr Plus.app not built: run scripts/build --daily")
+        die(f"artifacts/{NAME}.app not built: run scripts/build --daily")
     if subprocess.run(["codesign", "--verify", "--deep", str(BUILT)], capture_output=True).returncode != 0:
-        die("artifacts/Herdr Plus.app fails codesign --verify")
+        die(f"artifacts/{NAME}.app fails codesign --verify")
     built_ver = plistlib.loads((BUILT / "Contents/Info.plist").read_bytes()).get("CFBundleShortVersionString")
     ov = official_version()
     if ov and ov != want:
-        die(f"official Herdr is {ov}, Herdr Plus is built on {want}: rebuild on {ov} first (scripts/prepare-upstream after updating upstream.lock.json)")
+        die(f"official Herdr is {ov}, {NAME} is built on {want}: rebuild on {ov} first (scripts/prepare-upstream after updating upstream.lock.json)")
     if not APP_HOME.is_dir():
         die(f"no Herdr home at {APP_HOME}: open Herdr once first")
     old = load_manifest() or {"entries": []}
     ours = {e["path"]: e for e in old["entries"]}
-    items = [("app", app_dir / "Herdr Plus.app", BUILT)]
+    items = [("app", app_dir / f"{NAME}.app", BUILT)]
     items += [("mod", APP_HOME / "mods" / m, ROOT / "mods" / m) for m in MODS]
     items += [("layout", APP_HOME / "layouts" / f"{LAYOUT}.json", ROOT / "layouts/herdr-preview.json.in")]
     actions, conflicts = [], []
@@ -127,15 +130,15 @@ def copy_atomic(src: Path, dst: Path):
 
 def install(app_dir: Path, dry: bool):
     built_ver, actions, conflicts = plan_install(app_dir)
-    print(f"Herdr Plus {built_ver} (official Herdr {official_version() or 'not found'}), home {APP_HOME}")
+    print(f"{NAME} {built_ver} (official Herdr {official_version() or 'not found'}), home {APP_HOME}")
     for a, kind, dst, _ in actions:
         print(f"  {a:8} {kind:6} {dst}")
     if conflicts:
         for c in conflicts:
             print(f"  REFUSE  {c}")
         die("nothing was changed")
-    if running(app_dir / "Herdr Plus.app"):
-        die("Herdr Plus is running: quit it first (its terminals keep running in herdr-core)")
+    if running(app_dir / f"{NAME}.app"):
+        die(f"{NAME} is running: quit it first (its terminals keep running in herdr-core)")
     print("  unchanged: /Applications/Herdr.app, built-in mods and layouts, workspaces, terminals, agents")
     if dry:
         print("dry run: nothing changed")
@@ -153,11 +156,11 @@ def install(app_dir: Path, dry: bool):
 def uninstall(dry: bool, purge: bool):
     m = load_manifest()
     if not m:
-        print("Herdr Plus is not installed (no manifest)")
+        print(f"{NAME} is not installed (no manifest)")
         return
     apps = [Path(e["path"]) for e in m["entries"] if e["kind"] == "app"]
     if any(running(a) for a in apps):
-        die("Herdr Plus is running: quit it first")
+        die(f"{NAME} is running: quit it first")
     keep = []
     for e in m["entries"]:
         p = Path(e["path"])
@@ -172,8 +175,7 @@ def uninstall(dry: bool, purge: bool):
         print(f"  remove  {p}")
         if not dry:
             shutil.rmtree(p) if p.is_dir() else p.unlink()
-    data = STATE / "Chromium"
-    for d in [HOME / "Library/Application Support/HerdrPlus/Chromium"]:
+    for d in [HOME / "Library/Application Support" / EXE / "Chromium"]:
         if d.exists():
             print(f"  {'remove' if purge else 'keep  '}  {d} (browser logins and history{'' if purge else '; --purge-data removes it'})")
             if purge and not dry:

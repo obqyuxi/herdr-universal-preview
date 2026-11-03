@@ -101,3 +101,11 @@
   2. 向上游提交窄接口 `nativeView`；被接受后就是纯 mod 安装（WebKit 版的接受可能性更高）；
   3. 一键脚本从源码编译。
 - 建议 1 和 2 并行。
+
+## D13 日用版改名为 DD-up，换用自己的图标（用户决定，2026-11-03）
+
+- 名称集中在 `brand.env`：`APP_NAME=DD-up`、`APP_EXE=DD-up`、`APP_ID=dev.ddup.app`、`LAYOUT=dd-up`。`scripts/build --daily` 和 `scripts/lib/install.py` 都从这里读取。
+- 旧的 Herdr Plus 安装已经按清单卸载（它在日常环境里从未打开过，没有浏览器资料），之后再装 DD-up。
+- 图标：`assets/icon/logo.svg`（矢量源文件，由 Claude 设计：两块"D"形面板代表终端和预览，右侧那块抬高表示"up"），用 `scripts/make-icon`（项目内的 resvg 0.49.0 加系统 iconutil）生成 `assets/icon/AppIcon.icns`。两个文件都提交到仓库，构建时不需要 resvg。
+- 只影响日用版；开发版仍然叫 Herdr Preview Dev，用官方图标。首次运行时缺少 core 才出现的设置窗口里，内置图片和标题仍然是 Herdr，没有打补丁。
+- 签名：本机临时签名（ad-hoc），本机编译且没有隔离属性，自己使用不需要 Apple 开发者账号。发给别人下载时的签名问题留到 D12 再定。

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Herdr Plus (the everyday edition) beside the official Herdr.
+# Install the everyday edition (name in brand.env, e.g. DD-up) beside the official Herdr.
 # Adds the app, three mods and one layout; records them in a manifest.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -7,10 +7,10 @@ case ${1:-} in
   -h|--help) cat <<USAGE
 Usage: scripts/install [--dry-run] [--app-dir DIR]
 
-  Build first: scripts/build --daily (artifacts/Herdr Plus.app).
-  Adds  DIR/Herdr Plus.app (default ~/Applications),
+  Build first: scripts/build --daily (artifacts/<APP_NAME>.app).
+  Adds  DIR/<APP_NAME>.app (default ~/Applications),
         ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus},
-        ~/.config/herdr-app/layouts/herdr-plus.json
+        ~/.config/herdr-app/layouts/<LAYOUT>.json
   Refuses anything that exists and isn't ours. Never touches /Applications/Herdr.app,
   built-in mods/layouts, workspaces, terminals or agent sessions.
   --dry-run   list what would change; change nothing

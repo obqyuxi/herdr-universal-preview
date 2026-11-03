@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Render assets/icon/logo.svg into assets/icon/AppIcon.icns (all macOS sizes).
+# Needs resvg in .local/tools (cargo install resvg --locked --root .local/tools).
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+case ${1:-} in -h|--help) echo "Usage: scripts/make-icon   (logo.svg -> AppIcon.icns; commit both)"; exit 0 ;; esac
+resvg=$HUP_LOCAL/tools/bin/resvg
+[[ -x $resvg ]] || hup_die "no resvg: run: . scripts/lib/env.sh; hup_toolchain; cargo install resvg --locked --root .local/tools"
+src=$HUP_ROOT/assets/icon/logo.svg
+set_dir=$(mktemp -d)/AppIcon.iconset
+mkdir -p "$set_dir"
+for s in 16 32 128 256 512; do
+  "$resvg" -w $s "$src" "$set_dir/icon_${s}x${s}.png"
+  "$resvg" -w $((s * 2)) "$src" "$set_dir/icon_${s}x${s}@2x.png"
+done
+iconutil -c icns "$set_dir" -o "$HUP_ROOT/assets/icon/AppIcon.icns"
+rm -rf "$(dirname "$set_dir")"
+echo "assets/icon/AppIcon.icns ($(du -h "$HUP_ROOT/assets/icon/AppIcon.icns" | cut -f1))"
