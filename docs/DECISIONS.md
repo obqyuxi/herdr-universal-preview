@@ -202,3 +202,9 @@
   - 原生单元测试 12 项通过；Chromium 6/6、网页与 PDF 13/13、音视频与 Quick Look 7/7 全部通过。
   - 4 个网站的图标保存成功，图标、历史记录和加载进度条都截图看过；impeccable detect 没有发现问题。
   - 快捷键需要真实按键才能触发，没有自动测试。
+
+## D22 内嵌浏览器默认不用钥匙串（用户选 A，2026-11-03）
+
+- 那个 "Chromium Safe Storage" 条目是 agent-browser 下载的 Google Chrome for Testing（`~/.agent-browser/browsers/chrome-149…`）在 2026-06-26 建的。CEF 用的是同一个写死的名字，选 B 就等于和它共用一把钥匙。另外，它的访问名单里还有 7 项本项目的测试版，都是之前在弹窗里点了允许加进去的，用户可以在"钥匙串访问"里自行删掉。
+- 所有构建默认加 `--use-mock-keychain`：不弹窗，更新后网页也不会卡住；登录状态仍然保存在 DD-up 自己的资料目录里，靠 macOS 账户的文件权限保护。设置 `HUP_CHROMIUM_SYSTEM_KEYCHAIN=1` 可以改回用钥匙串。
+- 日用版此前没有启动过浏览器（`~/Library/Application Support/DD-up/Chromium` 不存在），所以没有丢失任何登录状态。

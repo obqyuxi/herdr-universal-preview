@@ -128,13 +128,15 @@ wrap_app! {
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
             Some(HupBrowserProcess::new())
         }
-        // Tests: `HUP_CHROMIUM_MOCK_KEYCHAIN=1` (set by scripts/lib/env.sh) keeps
-        // Chromium away from the login keychain. CEF's item is the shared
-        // "Chromium Safe Storage", and each rebuild has a new ad-hoc signature,
-        // so every test build would otherwise put up a keychain prompt and stall
-        // all network loads until someone answers it.
+        // No login keychain by default (the person's choice, docs/DECISIONS.md D22).
+        // CEF's item is the fixed, shared "Chromium Safe Storage" (other
+        // Chromium-based apps use it too), and every update has a new ad-hoc
+        // signature, so macOS would ask again after each one and every page
+        // would wait for the answer. Cookies stay in this app's own profile,
+        // protected by the macOS account's file permissions.
+        // `HUP_CHROMIUM_SYSTEM_KEYCHAIN=1` uses the keychain instead.
         fn on_before_command_line_processing(&self, _process_type: Option<&CefString>, command_line: Option<&mut CommandLine>) {
-            if std::env::var_os("HUP_CHROMIUM_MOCK_KEYCHAIN").is_some_and(|v| v == "1")
+            if std::env::var_os("HUP_CHROMIUM_SYSTEM_KEYCHAIN").is_none_or(|v| v != "1")
                 && let Some(cl) = command_line
             {
                 cl.append_switch(Some(&CefString::from("use-mock-keychain")));
