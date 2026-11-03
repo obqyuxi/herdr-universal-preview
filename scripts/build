@@ -6,11 +6,14 @@ set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: scripts/build [--release] [--baseline] [--no-bundle] [-- cargo-args...]
+Usage: scripts/build [--release] [--daily] [--baseline] [--no-bundle] [-- cargo-args...]
 
   (default)    cargo build (debug) in $HUP_UPSTREAM, then bundle it as
                artifacts/Herdr Preview Dev.app
   --release    optimized build
+  --daily      the everyday edition: artifacts/Herdr Plus.app (release, bundle id
+               dev.herdr.app.plus, uses the normal ~/.config/herdr-app; no dev guard,
+               no isolated environment). Install with scripts/install
   --baseline   build the work copy as-is without the dev bundle (used for the
                unpatched M0 toolchain check); implies --no-bundle
   --no-bundle  skip the app bundle
@@ -18,11 +21,12 @@ Run scripts/prepare-upstream first. Logs: .local/logs/build-*.log
 EOF
 }
 
-profile=debug bundle=1 extra=()
+profile=debug bundle=1 daily=0 extra=()
 while (($#)); do
   case $1 in
     -h|--help) usage; exit 0 ;;
     --release) profile=release ;;
+    --daily) profile=release daily=1 ;;
     --baseline|--no-bundle) bundle=0 ;;
     --) shift; extra=("$@"); break ;;
     *) usage >&2; exit 2 ;;
@@ -35,7 +39,15 @@ hup_toolchain
 [[ -x $CARGO_HOME/bin/cargo && -x $ZIG ]] || hup_die "toolchain missing; run scripts/bootstrap-toolchain"
 # Never a release/updating build: src/update.rs only updates with these set.
 unset HERDR_APP_RELEASE HERDR_RELEASES_URL
-export HUP_DEV_BUILD=1          # read by our patch: refuse to run without an isolated home
+if (( daily )); then
+  unset HUP_DEV_BUILD
+  APP_NAME="Herdr Plus" APP_EXE=HerdrPlus APP_ID=dev.herdr.app.plus
+  app="$HUP_ROOT/artifacts/Herdr Plus.app"
+else
+  export HUP_DEV_BUILD=1          # read by our patch: refuse to run without an isolated home
+  APP_NAME="Herdr Preview Dev" APP_EXE=HerdrPreviewDev APP_ID=dev.herdr.app.preview-dev
+  app=$HUP_DEV_APP
+fi
 args=(build --locked)
 [[ $profile == release ]] && args+=(--release)
 
@@ -52,32 +64,21 @@ echo "built in $((SECONDS - start))s: $HUP_UPSTREAM/target/$profile/herdr-app"
 
 version=$(cd "$HUP_UPSTREAM" && sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 rev=$(git -C "$HUP_UPSTREAM" rev-parse --short HEAD)
-app=$HUP_DEV_APP
 # Keep the (large) Chromium framework between builds; rebuild everything else.
 if [[ -d $app ]]; then
   find "$app/Contents" -mindepth 1 -maxdepth 1 ! -name Frameworks -exec rm -rf {} +
   find "$app/Contents/Frameworks" -mindepth 1 -maxdepth 1 -name '*Helper*.app' -exec rm -rf {} + 2>/dev/null || true
 fi
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
-cp "$HUP_UPSTREAM/target/$profile/herdr-app" "$HUP_DEV_EXE"
-cp "$HUP_UPSTREAM/assets/icons/Herdr.icns" "$app/Contents/Resources/HerdrPreviewDev.icns"
+cp "$HUP_UPSTREAM/target/$profile/herdr-app" "$app/Contents/MacOS/$APP_EXE"
+cp "$HUP_UPSTREAM/assets/icons/Herdr.icns" "$app/Contents/Resources/$APP_EXE.icns"
 cp "$HUP_UPSTREAM/LICENSE" "$HUP_UPSTREAM/THIRD-PARTY-NOTICES" "$app/Contents/Resources/"
-# LSEnvironment: even a Finder/Dock launch gets the isolated home, core and session.
-cat >"$app/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>CFBundleExecutable</key><string>HerdrPreviewDev</string>
-    <key>CFBundleIdentifier</key><string>dev.herdr.app.preview-dev</string>
-    <key>CFBundleName</key><string>Herdr Preview Dev</string>
-    <key>CFBundleDisplayName</key><string>Herdr Preview Dev</string>
-    <key>CFBundleIconFile</key><string>HerdrPreviewDev</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$version</string>
-    <key>CFBundleVersion</key><string>$version-hup.$rev</string>
-    <key>NSPrincipalClass</key><string>NSApplication</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>LSEnvironment</key><dict>
+# Dev: LSEnvironment gives even a Finder/Dock launch the isolated home, core and
+# session. Daily: the normal home and core, like the official app.
+if (( daily )); then
+  lsenv=""
+else
+  lsenv="
         <key>HERDR_APP_HOME</key><string>$HUP_APP_HOME</string>
         <key>HC_SESSION</key><string>$HUP_SESSION</string>
         <key>XDG_STATE_HOME</key><string>$HUP_SHORT/state</string>
@@ -87,7 +88,26 @@ cat >"$app/Contents/Info.plist" <<PLIST
         <key>HERDR_APP_NO_SOUND</key><string>1</string>
         <key>HERDR_TELEMETRY</key><string>0</string>
         <key>HUP_CHROMIUM_PROFILE</key><string>$HUP_LOCAL/chromium-profile</string>
-    </dict>
+    "
+fi
+cat >"$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleExecutable</key><string>$APP_EXE</string>
+    <key>CFBundleIdentifier</key><string>$APP_ID</string>
+    <key>CFBundleName</key><string>$APP_NAME</string>
+    <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+    <key>CFBundleIconFile</key><string>$APP_EXE</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundleVersion</key><string>$version-hup.$rev</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>Terminal programs running in Herdr can use the microphone, for example for voice input.</string>
+    <key>NSCameraUsageDescription</key><string>Terminal programs running in Herdr can use the camera.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Terminal programs running in Herdr can use AppleScript to control other apps.</string>
+    <key>LSEnvironment</key><dict>$lsenv</dict>
 </dict></plist>
 PLIST
 plutil -lint "$app/Contents/Info.plist" >/dev/null
@@ -102,7 +122,7 @@ hargs=(build --manifest-path "$HUP_ROOT/native/herdr-native-view/Cargo.toml" --f
 CARGO_TARGET_DIR=$HUP_LOCAL/target-native cargo "${hargs[@]}" >"$hlog" 2>&1 || { tail -30 "$hlog" >&2; hup_die "helper build failed"; }
 helper_bin=$HUP_LOCAL/target-native/$profile/herdr-cef-helper
 for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
-  name="HerdrPreviewDev Helper$suffix"
+  name="$APP_EXE Helper$suffix"
   h="$app/Contents/Frameworks/$name.app"
   mkdir -p "$h/Contents/MacOS"
   cp "$helper_bin" "$h/Contents/MacOS/$name"
@@ -112,7 +132,7 @@ for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
     <key>CFBundleExecutable</key><string>$name</string>
-    <key>CFBundleIdentifier</key><string>dev.herdr.app.preview-dev.helper${id_suffix:+.$id_suffix}</string>
+    <key>CFBundleIdentifier</key><string>$APP_ID.helper${id_suffix:+.$id_suffix}</string>
     <key>CFBundleName</key><string>$name</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
@@ -124,4 +144,4 @@ HPLIST
 done
 codesign --force --deep --sign - "$app" 2>/dev/null
 codesign --verify --deep "$app"
-echo "bundle: $app ($version-hup.$rev, dev.herdr.app.preview-dev, ad-hoc signed, $(du -sh "$app" | cut -f1) with Chromium)"
+echo "bundle: $app ($version-hup.$rev, $APP_ID, ad-hoc signed, $(du -sh "$app" | cut -f1) with Chromium)"

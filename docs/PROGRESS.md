@@ -2,6 +2,9 @@
 
 ## 当前阶段
 
+**2026-11-02：已安装为日用版 Herdr Plus**，见 INSTALL.md 和 ROLLBACK.md。安装清单位于 `~/Library/Application Support/HerdrPlus/install-manifest.json`。等用户退出官方 Herdr、打开 Herdr Plus，并切换到 `herdr-plus` 布局。
+
+
 **用户 2026-11-02 收窄范围**：只要两件事，验收以这两件事为准。
 
 1. Files 面板点 Word/Excel/PPT/PDF/图片/音视频就能直接看（`mods/files-plus`）。

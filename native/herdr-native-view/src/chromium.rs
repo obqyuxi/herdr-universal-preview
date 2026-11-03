@@ -8,7 +8,7 @@
 //! `Contents/Frameworks/<exe> Helper*.app` (see scripts/build).
 //!
 //! Profile: `$HUP_CHROMIUM_PROFILE`, else `~/Library/Application Support/
-//! Herdr Preview Dev/Chromium`. Never the person's Chrome profile.
+//! <executable>/Chromium`. Never the person's Chrome profile.
 
 use cef::*;
 use objc2::MainThreadMarker;
@@ -175,7 +175,9 @@ fn profile_dir() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
-    home.join("Library/Application Support/Herdr Preview Dev/Chromium")
+    // Per app: "HerdrPlus" (daily) and "HerdrPreviewDev" never share a profile.
+    let app = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "Herdr".into());
+    home.join("Library/Application Support").join(app).join("Chromium")
 }
 
 /// Loads and initializes CEF once (main thread). Later calls return the first result.

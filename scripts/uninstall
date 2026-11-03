@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Remove what scripts/install added (only entries still unchanged).
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+case ${1:-} in
+  -h|--help) cat <<USAGE
+Usage: scripts/uninstall [--dry-run] [--purge-data]
+
+  Removes Herdr Plus.app, the files-plus/browser/tabs-plus mods and the herdr-plus layout,
+  but only items whose content is unchanged since install (changed ones are kept and listed).
+  --purge-data  also delete Herdr Plus's own browser profile (its logins and history)
+  --dry-run     list only
+USAGE
+  exit 0 ;;
+esac
+exec /usr/bin/python3 -I "$here/lib/install.py" uninstall "$@"
