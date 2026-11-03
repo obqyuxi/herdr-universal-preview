@@ -11,9 +11,9 @@ Usage: scripts/build [--release] [--daily] [--baseline] [--no-bundle] [-- cargo-
   (default)    cargo build (debug) in $HUP_UPSTREAM, then bundle it as
                artifacts/Herdr Preview Dev.app
   --release    optimized build
-  --daily      the everyday edition: artifacts/Herdr Plus.app (release, bundle id
-               dev.herdr.app.plus, uses the normal ~/.config/herdr-app; no dev guard,
-               no isolated environment). Install with scripts/install
+  --daily      the everyday edition, named in brand.env (artifacts/<APP_NAME>.app;
+               release, uses the normal ~/.config/herdr-app; no dev guard, no
+               isolated environment). Install with scripts/install
   --baseline   build the work copy as-is without the dev bundle (used for the
                unpatched M0 toolchain check); implies --no-bundle
   --no-bundle  skip the app bundle
@@ -41,8 +41,8 @@ hup_toolchain
 unset HERDR_APP_RELEASE HERDR_RELEASES_URL
 if (( daily )); then
   unset HUP_DEV_BUILD
-  APP_NAME="Herdr Plus" APP_EXE=HerdrPlus APP_ID=dev.herdr.app.plus
-  app="$HUP_ROOT/artifacts/Herdr Plus.app"
+  . "$HUP_ROOT/brand.env"
+  app="$HUP_ROOT/artifacts/$APP_NAME.app"
 else
   export HUP_DEV_BUILD=1          # read by our patch: refuse to run without an isolated home
   APP_NAME="Herdr Preview Dev" APP_EXE=HerdrPreviewDev APP_ID=dev.herdr.app.preview-dev
@@ -71,7 +71,9 @@ if [[ -d $app ]]; then
 fi
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
 cp "$HUP_UPSTREAM/target/$profile/herdr-app" "$app/Contents/MacOS/$APP_EXE"
-cp "$HUP_UPSTREAM/assets/icons/Herdr.icns" "$app/Contents/Resources/$APP_EXE.icns"
+icon=$HUP_UPSTREAM/assets/icons/Herdr.icns
+(( daily )) && [[ -f $HUP_ROOT/assets/icon/AppIcon.icns ]] && icon=$HUP_ROOT/assets/icon/AppIcon.icns
+cp "$icon" "$app/Contents/Resources/$APP_EXE.icns"
 cp "$HUP_UPSTREAM/LICENSE" "$HUP_UPSTREAM/THIRD-PARTY-NOTICES" "$app/Contents/Resources/"
 # Dev: LSEnvironment gives even a Finder/Dock launch the isolated home, core and
 # session. Daily: the normal home and core, like the official app.

@@ -175,7 +175,7 @@ fn profile_dir() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
-    // Per app: "HerdrPlus" (daily) and "HerdrPreviewDev" never share a profile.
+    // Per app: the daily edition (e.g. "DD-up") and "HerdrPreviewDev" never share a profile.
     let app = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "Herdr".into());
     home.join("Library/Application Support").join(app).join("Chromium")
 }

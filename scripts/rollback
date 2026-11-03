@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Go back to the official Herdr: uninstall Herdr Plus, then reopen Herdr.app.
+# Go back to the official Herdr: uninstall the everyday edition, then reopen Herdr.app.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 case ${1:-} in
