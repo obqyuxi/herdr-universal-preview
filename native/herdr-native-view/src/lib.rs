@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(all(target_os = "macos", feature = "chromium"))]
+pub mod chromium;
+
 /// The interface version mods check before using any of this.
 pub const INTERFACE: &str = "native-view/0";
 
@@ -72,6 +75,8 @@ pub enum Kind {
     Pdf,
     Media,
     QuickLook,
+    /// A Chromium (CEF) browser; only in builds with the `chromium` feature.
+    Chromium,
 }
 
 impl Kind {
@@ -81,8 +86,9 @@ impl Kind {
             "pdf" => Ok(Kind::Pdf),
             "media" => Ok(Kind::Media),
             "quicklook" => Ok(Kind::QuickLook),
+            "chromium" => Ok(Kind::Chromium),
             other => Err(format!(
-                "unknown native view kind `{other}` (web, pdf, media, quicklook)"
+                "unknown native view kind `{other}` (web, pdf, media, quicklook, chromium)"
             )),
         }
     }
@@ -93,6 +99,7 @@ impl Kind {
             Kind::Pdf => "pdf",
             Kind::Media => "media",
             Kind::QuickLook => "quicklook",
+            Kind::Chromium => "chromium",
         }
     }
 
@@ -139,6 +146,24 @@ impl Kind {
                 "media.setVolume",
             ],
             Kind::QuickLook => &COMMON,
+            Kind::Chromium => &[
+                "focus",
+                "blur",
+                "setVisible",
+                "state",
+                "dispose",
+                "browser.navigate",
+                "browser.back",
+                "browser.forward",
+                "browser.reload",
+                "browser.stop",
+                "browser.zoomIn",
+                "browser.zoomOut",
+                "browser.zoomReset",
+                "browser.print",
+                "browser.find",
+                "browser.stopFind",
+            ],
         }
     }
 
@@ -189,8 +214,8 @@ impl Spec {
                 .ok_or("missing `kind`")?,
         )?;
         if let Some(url) = v.get("url").and_then(Value::as_str) {
-            if kind != Kind::Web {
-                return Err("`url` is only for kind web; local content uses `path`".into());
+            if kind != Kind::Web && kind != Kind::Chromium {
+                return Err("`url` is only for web views; local content uses `path`".into());
             }
             return Ok(Spec {
                 kind,
@@ -337,7 +362,11 @@ pub fn redact_url(u: &str) -> String {
 
 /// What the host can do, for `nativeViewCapabilities()`.
 pub fn capabilities() -> Value {
-    let kinds: Vec<Value> = [Kind::Web, Kind::Pdf, Kind::Media, Kind::QuickLook]
+    let mut all = vec![Kind::Web, Kind::Pdf, Kind::Media, Kind::QuickLook];
+    if cfg!(feature = "chromium") {
+        all.push(Kind::Chromium);
+    }
+    let kinds: Vec<Value> = all
         .iter()
         .map(|k| json!({ "kind": k.name(), "actions": k.actions() }))
         .collect();
