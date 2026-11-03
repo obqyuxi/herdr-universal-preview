@@ -61,6 +61,7 @@ hup_isolate() {
   export HERDR_CORE_DIRS=$HUP_BIN            # app looks for its core only here
   export HC_INSTALL_DIR=$HUP_BIN             # a core install, if ever triggered, lands here
   export HERDR_APP_NO_SOUND=1
+  export HERDR_TELEMETRY=0                   # source builds never send; also keep it off locally
   mkdir -p "$HUP_LOCAL/state" "$HUP_LOCAL/config" "$HUP_APP_HOME" "$HUP_LOGS" "$HUP_RUN"
 }
 

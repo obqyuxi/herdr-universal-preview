@@ -2,34 +2,41 @@
 
 ## 当前阶段
 
-M0 完成，M1 进行中：原生视图承载原型。
+M1（原生视图承载原型）：代码和宿主自检已完成，**正在等待人工 GUI 验收**（`tests/gui/M1_CHECKLIST.md`）。
 
 ## 最新提交
 
-见 `git log`。M0 的提交是 "M0: inventory, isolation, toolchain, baseline build"。
+见 `git log`：先是 M0，然后是 "M1: native view hosting prototype (self-checked, GUI acceptance pending)"。
 
-## 已验证（分层记录）
+## 已验证
 
-| 层 | 内容 | 结果 |
-|---|---|---|
-| 环境 | 本机、工具、正式 Herdr，见 ENVIRONMENT.md | 已核实 |
-| 隔离 | `scripts/dev isolation-check`：测试 core 与正式 core 的 id/pid 不同，标记终端不串，正式环境指纹前后不变 | 通过 |
-| 工具链 | rustc 1.95.0、zig 0.16.0，均安装在项目内 | 通过 |
-| 上游 | v0.1.12 `4aa3460` + ghostty `291fd050`；补丁导出后重建，提交哈希可复现（`c2e66b1`） | 通过 |
-| 编译 | v0.1.12 + 补丁 0001（跳过 ghostty xcframework），debug 构建 | 通过 |
-| 上游单元测试 | `cargo test --locked`：258 通过；`notices` 失败，原因是 build.rs 指纹变化（预期，M1 中重新生成） | 部分 |
-| 本项目单元测试 | `scripts/test`：native crate 7 项，clippy 与 rustfmt 无问题 | 通过 |
-| GUI | 尚未启动任何 App | 未执行 |
+- M0 的全部内容（见 ENVIRONMENT.md）。
+- M1：
+  - 补丁 0001–0002 能在固定提交上重建；
+  - 编译通过；
+  - 上游测试全部通过；
+  - native crate 单元测试通过；
+  - 开发版和正式 0.1.12 都通过了 `check`；
+  - 宿主自检 13/13 与 7/7；
+  - 命令面板遮挡时视图让位，关闭后恢复且状态保留；
+  - 每次运行 App 前后，正式环境指纹都不变。
+- **未验证**：任何需要人眼或人耳确认的 GUI 项（G1–G24）。
 
 ## 下一条可执行动作
 
-M1：完成宿主粘合补丁（`.work/herdr-app/src/native_view.rs` 等），然后执行：
-
 ```sh
-scripts/prepare-upstream --export && scripts/build && scripts/dev app-up
+scripts/dev app-up              # 如果没在运行
+tests/integration/native-selfcheck && tests/integration/native-selfcheck-media
+# 然后请用户按 tests/gui/M1_CHECKLIST.md 操作，把结果写入 ACCEPTANCE.md
 ```
+
+M1 GUI 验收期间可以并行推进的 M2 工作：
+
+- 复制 Files，做出 universal-files；
+- ResourceRef 和路由；
+- Markdown：可以使用 gpui-kit 的 `TextView`，它支持 markdown 和 html 格式，是普通 Mod 版的候选方案。
 
 ## 中断恢复
 
 1. 先读本文件、TASKS.md 和 `git status`，再执行 `scripts/doctor`。
-2. `.work/herdr-app` 中未提交的改动属于未导出的开发工作。先在 `hup` 分支上提交，再执行 `scripts/prepare-upstream --export`，不要直接重建。
+2. `.work/herdr-app` 中未提交的改动属于未导出的开发工作。先在 `hup` 分支上提交，再执行 `scripts/prepare-upstream --export`。

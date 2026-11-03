@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Host self-check of the running Herdr Preview Dev (M1 layout): drives native
+# views through `native.call` and records `native.debug`. This is internal
+# evidence only — it does not replace the manual GUI checklist.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/../.." && pwd)
+dev=$root/scripts/dev
+out=${1:-$root/artifacts/m1-selfcheck.jsonl}
+case ${1:-} in -h|--help) echo "Usage: tests/integration/native-selfcheck [out.jsonl]   (needs scripts/dev app-up with the universal-preview layout)"; exit 0 ;; esac
+: >"$out"
+"$dev" app-install >/dev/null
+"$dev" app do layout.switch '{"name":"universal-preview"}' >/dev/null
+sleep 3
+
+keys=$("$dev" app do native.debug | /usr/bin/python3 -c 'import json,sys;print(" ".join(json.load(sys.stdin)["views"]))')
+key_of() { tr ' ' '\n' <<<"$keys" | grep ":$1\$" || true; }
+
+# call KEY ACTION [ARGS_JSON] -> one JSON line {step, ok, result|error}
+call() {
+  local key=$1 action=$2 args=${3:-null}
+  local body
+  body=$(/usr/bin/python3 -c 'import json,sys;print(json.dumps({"key":sys.argv[1],"action":sys.argv[2],"args":json.loads(sys.argv[3])}))' "$key" "$action" "$args")
+  { "$dev" app do native.call "$body" 2>&1 || true; } | /usr/bin/python3 -c '
+import json,sys
+step=sys.argv[1]; raw=sys.stdin.read()
+try: r=json.loads(raw)
+except Exception: r={"error": raw.strip()}
+ok = not (isinstance(r, dict) and "error" in r)
+print(json.dumps({"step": step, "ok": ok, "result": r}, ensure_ascii=False))' "$action ${3:-}" | tee -a "$out"
+}
+
+expect() { # STEP_DESC PY_EXPR(on last line r) — appends a verdict line
+  tail -1 "$out" | /usr/bin/python3 -c '
+import json,sys
+desc,expr=sys.argv[1],sys.argv[2]; line=json.loads(sys.stdin.read()); r=line["result"]
+ok=bool(eval(expr))
+print(json.dumps({"check": desc, "pass": ok}, ensure_ascii=False))' "$1" "$2" | tee -a "$out"
+}
+
+pdf=$(key_of view-b); web=$(key_of view-a)
+[[ -n $pdf && -n $web ]] || { echo "expected view-a (web) and view-b (pdf) from the M1 layout; got: $keys" >&2; exit 1; }
+
+call "$pdf" pdf.goToPage '{"page":2}';  expect "PDF jumps to page 2" 'r["page"]==2 and r["pageCount"]==3'
+call "$pdf" pdf.next;                    expect "PDF next goes to page 3" 'r["page"]==3'
+call "$pdf" pdf.goToPage '{"page":9}';  expect "PDF refuses page 9 of 3" '"error" in r'
+call "$pdf" pdf.zoomIn;                  expect "PDF zoom changes scale" 'r["scale"]>0'
+call "$pdf" exec;                        expect "unknown action refused" '"error" in r'
+call "$web" media.play;                  expect "media action refused on a web view" '"error" in r'
+call "$web" browser.navigate '{"url":"javascript:alert(1)"}'; expect "javascript: URL refused" '"error" in r'
+call "$web" state;                       expect "local site loaded with title" 'r["content"]["title"]=="HUP 本地测试页"'
+call "$web" browser.navigate '{"url":"example.com"}'; expect "navigate returns a new generation" 'r["generation"]>=2'
+sleep 5
+call "$web" state;                       expect "example.com loaded over https" 'r["content"]["url"].startswith("https://example.com") and not r["content"]["loading"]'
+call "$web" browser.back;                sleep 2
+call "$web" state;                       expect "back returns to the local site" 'r["content"]["url"].startswith("file://")'
+call "$web" setVisible '{"visible":false}'
+call "$web" state;                       expect "setVisible false hides the view" 'r["hidden"] is True'
+call "$web" setVisible '{"visible":true}'; sleep 0.5
+call "$web" state;                       expect "setVisible true shows it again" 'r["hidden"] is False'
+
+"$dev" app do native.debug >"${out%.jsonl}-debug.json"
+/usr/bin/python3 - "$out" <<'PY'
+import json,sys
+lines=[json.loads(l) for l in open(sys.argv[1])]
+checks=[l for l in lines if "check" in l]
+bad=[c["check"] for c in checks if not c["pass"]]
+print(f"{len(checks)-len(bad)}/{len(checks)} self-checks passed" + (f"; failed: {bad}" if bad else ""))
+sys.exit(1 if bad else 0)
+PY

@@ -1,0 +1,6 @@
+corrupt-text.mp4	error=Cannot Open
+sample-h264-aac.mp4	duration=6.00s	vide:avc1 640x360 soun:aac 
+sample-h264-aac.mov	duration=6.00s	vide:avc1 640x360 soun:aac 
+sample-speech-aac.m4a	duration=3.70s	soun:aac 
+sample-speech.mp3	duration=3.74s	soun:.mp3
+sample-speech-pcm.wav	duration=3.70s	soun:lpcm

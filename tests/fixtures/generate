@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Regenerates every synthetic sample in tests/fixtures/samples (no real data).
+# Needs: Command Line Tools (swiftc, afconvert, say) and uv; Python packages are
+# fetched into an ephemeral uv environment with a project-local cache.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../.." && pwd)
+out=$here/samples
+tools=$root/.local/fixture-tools
+case ${1:-} in -h|--help) echo "Usage: tests/fixtures/generate   (writes $out)"; exit 0 ;; "") ;; *) exit 2 ;; esac
+mkdir -p "$out" "$tools"
+export UV_CACHE_DIR=$root/.local/uv-cache
+
+echo "== PDF / MP4 / MOV (CoreText, AVAssetWriter)"
+swiftc -O "$here/gen/media.swift" -o "$tools/media"
+swiftc -O "$here/gen/probe.swift" -o "$tools/probe"
+"$tools/media" "$out"
+
+echo "== WAV (PCM 16-bit) / M4A (AAC) from synthesized speech + tone"
+say -v Tingting -o "$tools/speech.aiff" "预览测试音频。Herdr preview audio sample." 2>/dev/null || say -o "$tools/speech.aiff" "Herdr preview audio sample."
+afconvert -f WAVE -d LEI16@44100 -c 2 "$tools/speech.aiff" "$out/sample-speech-pcm.wav"
+afconvert -f m4af -d aac -b 128000 "$out/sample-speech-pcm.wav" "$out/sample-speech-aac.m4a"
+
+echo "== DOCX / XLSX / PPTX / MP3 (python-docx, openpyxl, python-pptx, lameenc)"
+uv run --quiet --no-project --with python-docx==1.1.2 --with openpyxl==3.1.5 --with python-pptx==1.0.2 --with lameenc==1.8.1 \
+  python -I "$here/gen/office_mp3.py" "$out" "$out/sample-speech-pcm.wav"
+
+echo "== HTML site (static files, written by this script)"
+mkdir -p "$out/site/img"
+cp "$here/gen/site/"*.html "$here/gen/site/"*.css "$out/site/"
+# A 96x96 RGBA PNG: transparent checkerboard (stdlib only).
+/usr/bin/python3 -I - "$out/site/img/checker.png" <<'PY'
+import struct, sys, zlib
+w = h = 96
+rows = b"".join(b"\0" + b"".join((b"\x2a\x5b\xd7\xff" if ((x // 12 + y // 12) % 2) else b"\x00\x00\x00\x00") for x in range(w)) for y in range(h))
+chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+open(sys.argv[1], "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+PY
+cp "$out/site/img/checker.png" "$out/transparent-checker.png"
+echo "== corrupt / oversize samples"
+# Deterministic: a real PDF cut short (no xref/trailer).
+head -c 2000 "$out/sample-3pages.pdf" >"$out/corrupt-truncated.pdf"
+printf 'not really a video' >"$out/corrupt-text.mp4"
+
+echo "== probe"
+"$tools/probe" "$out"/*.mp4 "$out"/*.mov "$out"/*.m4a "$out"/*.mp3 "$out"/*.wav | tee "$out/PROBE.txt"
+ls -la "$out"

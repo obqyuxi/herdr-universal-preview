@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HUP 本地测试页</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>Herdr Universal Preview · 本地测试页</h1>
+<p id="js-state">脚本未运行（静态模式下应保持这句话）。</p>
+<p><button id="btn">点我计数</button> <span id="count">0</span></p>
+<p><label>中文输入：<input id="text" placeholder="在这里用拼音输入中文" size="30"></label>
+   <span id="echo"></span></p>
+<p><a href="page2.html">站内链接：第二页</a> · <a href="page2.html" target="_blank">新窗口链接（应在同一视图打开）</a></p>
+<p><img src="img/checker.png" alt="透明棋盘图（相对路径图片）" width="96" height="96"></p>
+<p>可选中复制的一段文字：The quick brown fox 敏捷的棕色狐狸。</p>
+<script>
+  document.getElementById("js-state").textContent = "脚本已运行（交互模式）。";
+  let n = 0;
+  document.getElementById("btn").onclick = () => { document.getElementById("count").textContent = ++n; };
+  document.getElementById("text").oninput = (e) => { document.getElementById("echo").textContent = "→ " + e.target.value; };
+</script>
+</body>
+</html>

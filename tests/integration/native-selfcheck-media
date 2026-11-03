@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Host self-check for media + Quick Look (layout universal-preview-media: view-a MP4, view-b DOCX),
+# then a layout switch that must dispose both views. Internal evidence only.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/../.." && pwd)
+dev=$root/scripts/dev
+out=${1:-$root/artifacts/m1-selfcheck-media.jsonl}
+case ${1:-} in -h|--help) echo "Usage: tests/integration/native-selfcheck-media [out.jsonl]"; exit 0 ;; esac
+: >"$out"
+"$dev" app-install >/dev/null
+"$dev" app do layout.switch '{"name":"universal-preview-media"}' >/dev/null
+sleep 3
+debug() { "$dev" app do native.debug; }
+q() { /usr/bin/python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
+keys=$(debug | q 'print(" ".join(k for k,v in d["views"].items()))')
+media=$(tr ' ' '\n' <<<"$keys" | grep ':view-a$'); ql=$(tr ' ' '\n' <<<"$keys" | grep ':view-b$')
+call() {
+  local body; body=$(/usr/bin/python3 -c 'import json,sys;print(json.dumps({"key":sys.argv[1],"action":sys.argv[2],"args":json.loads(sys.argv[3])}))' "$1" "$2" "${3:-null}")
+  { "$dev" app do native.call "$body" 2>&1 || true; }
+}
+check() { # desc json py-expr
+  /usr/bin/python3 -c '
+import json,sys
+desc,raw,expr=sys.argv[1],sys.argv[2],sys.argv[3]
+try: r=json.loads(raw)
+except Exception: r={"error":raw}
+print(json.dumps({"check":desc,"pass":bool(eval(expr)),"result":r},ensure_ascii=False))' "$1" "$2" "$3" | tee -a "$out" | cut -c1-160
+}
+s=$(call "$media" state); check "media loaded, not autoplaying" "$s" 'r["content"]["rate"]==0 and r["content"]["status"]=="ready" and abs(r["content"]["duration"]-6)<0.2'
+s=$(call "$media" media.play); sleep 2
+s=$(call "$media" state); check "playing: rate 1 and time advanced" "$s" 'r["content"]["rate"]>0 and r["content"]["time"]>1'
+s=$(call "$media" media.seek '{"time":4.5}'); sleep 0.5
+s=$(call "$media" state); check "seek to the second half" "$s" 'r["content"]["time"]>=4.4'
+s=$(call "$media" media.pause)
+s=$(call "$media" state); check "paused" "$s" 'r["content"]["rate"]==0'
+s=$(call "$media" media.setMuted '{"muted":true}'); check "mute" "$s" 'r["muted"] is True'
+s=$(call "$ql" state); check "Quick Look has the DOCX item" "$s" 'r["content"]["hasItem"] is True and r["hidden"] is False'
+s=$(call "$media" media.play); sleep 1
+"$dev" app do layout.switch '{"name":"universal-preview"}' >/dev/null; sleep 2
+d=$(debug); check "layout switch disposed the media and Quick Look views" "$d" "not any(k in r['views'] for k in ['$media','$ql']) and any(e['event']=='view.disposed' and e['key']=='$media' for e in r['events'])"
+/usr/bin/python3 - "$out" <<'PY'
+import json,sys
+c=[json.loads(l) for l in open(sys.argv[1])]
+bad=[x["check"] for x in c if not x["pass"]]
+print(f"{len(c)-len(bad)}/{len(c)} media self-checks passed" + (f"; failed: {bad}" if bad else ""))
+sys.exit(1 if bad else 0)
+PY
