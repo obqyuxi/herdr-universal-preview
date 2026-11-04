@@ -216,3 +216,9 @@
 - files-plus：文件在当前文件夹内时，展开它所在的目录再预览；在文件夹外时按完整路径预览，标题只显示文件名。文件夹在当前文件夹内时在树里展开，在文件夹外时用 Finder 打开。点击可能刚把焦点换到另一个面板，导致根目录跟着变，所以 2 秒内会对新目录再执行一次。标题栏新增"用默认应用打开"，以前 Cmd+点击的效果仍然可以用到。
 - `native.open-link {path}` 走同一条路径，供脚本和自检使用。
 - 补丁 0006（同日修复）：用户实测点击没有反应。原因是右侧面板被顶栏的 Files 按钮收起了，files-plus 没在显示，命令发不进去。现在连同收起的面板一起展开（`layout.show`）。开发版自检确认：面板收起后调用 `native.open-link`，面板会展开并显示文件。
+
+## D24 DD-up 侧边栏不再用 space-folders（用户选 A，2026-11-04）
+
+- 用户的 10 个 folder 和 10 个 space 基本一一对应，每个 space 也只有 1 个 tab，folder 只多出一层，没起到分组作用。
+- 用户的 `main-folders` 布局和官方 `main` 唯一的区别就是侧边栏用的 mod，所以改为 `scripts/install --layout-from main`，侧边栏用回自带的 `spaces`。这个基础布局会被记住，以后安装都用它。程序本身没变，也不需要退出 DD-up。
+- 恢复办法：`scripts/install --layout-from main-folders`，或者用备份 `~/.config/herdr-app/layouts/dd-up.json.backup-20261104-035100`。`~/.config/herdr-space-folders.json` 和 space-folders mod 都原样保留。
