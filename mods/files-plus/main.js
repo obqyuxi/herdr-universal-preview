@@ -24,6 +24,10 @@ const NATIVE = Object.fromEntries([
 ]);
 const PREVIEW_ID = "file-preview";
 const hasNative = () => typeof herdr.nativeView?.new === "function";
+const absolute = p => /^(\/|[A-Za-z]:[\\/])/.test(p);
+// A clicked terminal link (`open:<path>` / `reveal:<path>`) also applies to the
+// folder the panel switches to right after, when the click focused another pane.
+const LINK_GRACE_MS = 2000;
 
 async function directory(path, on) {
   if (!on && window()?.platform === "windows") {
@@ -48,6 +52,43 @@ export default class Files extends View {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.refresh(cx);
     cx.timer.every(10000, cx => this.refresh(cx));
+    // Cmd-click on a file or folder link in a terminal (the host sends it here).
+    cx.spawn(async cx => {
+      for (;;) {
+        const c = String(await herdr.nextCommand());
+        const i = c.indexOf(":"), name = c.slice(0, i), path = c.slice(i + 1);
+        if ((name === "open" || name === "reveal") && path) {
+          this.link = { path, dir: name === "reveal", at: Date.now() };
+          if (key() !== this.context?.key) this.refresh(cx);
+          else this.follow(this.link, cx);
+        }
+        cx.notify();
+      }
+    });
+  }
+
+  // Shows a linked file (inside this folder: as its tree path; elsewhere: by full
+  // path), or opens a linked folder's branches in the tree.
+  follow(link, cx) {
+    // The link is a path on this Mac; a panel showing another machine can't read it.
+    if (this.on) { exec("open", [link.path]).catch(() => {}); return; }
+    const root = this.root?.replace(/[\\/]+$/, "");
+    const inside = root && (link.path === root ? "" : link.path.startsWith(root + "/") ? link.path.slice(root.length + 1) : null);
+    if (!link.dir) {
+      if (inside) this.expand(inside.split("/").slice(0, -1), cx);
+      this.show(inside || link.path, cx);
+      return;
+    }
+    if (inside === null || inside === undefined) { exec("open", [link.path]).catch(() => {}); return; }
+    this.show(null);
+    this.expand(inside ? inside.split("/") : [], cx);
+  }
+
+  expand(parts, cx) {
+    for (let n = 1; n <= parts.length; n++) {
+      const path = parts.slice(0, n).join("/");
+      if (!this.folders.has(path)) this.toggle(path, cx);
+    }
   }
 
   watch(root, cx) {
@@ -82,6 +123,7 @@ export default class Files extends View {
       this.pending = new Set(); this.marks = {}; this.show(null); this.watched = null; this.error = null; this.limited = false;
       this.loading = false;
       if (saved?.file) this.show(saved.file, cx);
+      if (this.link && Date.now() - this.link.at < LINK_GRACE_MS) this.follow(this.link, cx);
     }
     if (!cwd || this.loading) return;
     const context = this.context;
@@ -140,20 +182,20 @@ export default class Files extends View {
   show(path, cx) {
     this.code?.release(); this.code = null; this.file = path; this.fileError = null;
     const ext = path?.includes(".") ? path.split(".").pop().toLowerCase() : "";
-    const kind = NATIVE[ext];
+    const kind = NATIVE[ext], full = path && (absolute(path) ? path : `${this.root}/${path}`);
     if (path && kind && hasNative() && !this.on) {
       // Same element id: a new file loads into the open view.
-      this.native = { kind, path: `${this.root}/${path}` };
+      this.native = { kind, path: full };
       cx?.notify();
       return;
     }
     this.closeNative();
     if (path && kind && this.on) { this.fileError = "远程机器上的文件暂不支持内嵌预览"; cx?.notify(); return; }
     if (!path || !cx) return;
-    const context = this.context, root = this.root, on = this.on;
+    const context = this.context, on = this.on;
     cx.spawn(async cx => {
       try {
-        const text = await readTextFile(`${root}/${path}`, { on });
+        const text = await readTextFile(full, { on });
         if (this.file !== path || !this.current(context)) return;
         if (text === null) { this.fileError = "This file is no longer available"; return; }
         if (text.includes("\0")) { this.fileError = "Binary file · no text preview"; return; }
@@ -190,7 +232,9 @@ export default class Files extends View {
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))
         .child(div().font_semibold().child("Files"))
-        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(this.file ?? this.root?.split(/[\\/]/).pop() ?? "")))
+        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child((this.file && absolute(this.file) ? this.file.split(/[\\/]/).pop() : this.file) ?? this.root?.split(/[\\/]/).pop() ?? ""))
+        .when(Boolean(this.file) && !this.on, el => el.child(div().id("files-open-external").flex_none().cursor_pointer().text_size(12).text_color(t.muted).hover(s => s.text_color(t.foreground))
+          .on_click(() => { exec("open", [absolute(this.file) ? this.file : `${this.root}/${this.file}`]).catch(() => {}); }).child("用默认应用打开"))))
       .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], t))
         .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))

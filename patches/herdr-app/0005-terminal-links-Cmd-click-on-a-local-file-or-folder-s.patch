@@ -1,0 +1,210 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: herdr-universal-preview <hup@localhost>
+Date: Wed, 4 Nov 2026 02:07:03 -0800
+Subject: [PATCH 5/5] terminal links: Cmd-click on a local file or folder shows
+ it in the files-plus panel
+
+file: URLs (OSC 8 from agents) are decoded to paths; the stack holding
+files-plus is brought forward and the path is sent as open:/reveal:.
+Without a files-plus panel, links open with the system as before.
+native.open-link runs the same path for scripts and self-checks.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
+index 7133cb1..3113930 100644
+--- a/defaults/AGENTS.md
++++ b/defaults/AGENTS.md
+@@ -576,7 +576,8 @@ The main ones:
+   `layout.clone {name, as?}` (duplicate, then switch; default `<name>-copy`).
+ - Native views (Herdr Preview Dev builds of herdr-universal-preview): `native.debug` (every native
+   view's frame, visibility, focus, content state and recent events), `native.call {key, action, args?}`
+-  (one whitelisted action, key `<copy>:<id>`).
++  (one whitelisted action, key `<copy>:<id>`), `native.open-link {path}` (what Cmd-clicking a file or
++  folder link in a terminal does: show it in the files-plus panel, else open it with the system).
+ - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help`, `app.palette` (again: closes it), `app.settings {section?}`
+   (sections: `look`, `machines`, `alerts`, `updates`, `privacy`; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
+   `app.check_updates` (only a successful check reports Up to date; a failed check clears the checked time and can be retried), `app.update_core` (a newer herdr-core of this generation, terminals kept;
+diff --git a/src/commands.rs b/src/commands.rs
+index 1726873..b55a2e4 100644
+--- a/src/commands.rs
++++ b/src/commands.rs
+@@ -84,6 +84,7 @@ pub const COMMANDS: &[Command] = &[
+     // HUP: native content views (Herdr Preview Dev).
+     cmd("native.debug", &[], "Every native view: frame, visibility, focus, content state and recent events."),
+     cmd("native.call", &[req("key"), req("action"), opt("args")], "Run one whitelisted action on a native view (key: <copy>:<id>)."),
++    cmd("native.open-link", &[req("path")], "Open a local file or folder as a Cmd-clicked terminal link does: in the files-plus panel, else with the system."),
+     cmd("app.help", &[], "Show the keys."),
+     cmd("app.welcome", &[], "Show the welcome again."),
+     cmd("app.whats_new", &[], "Show what this release brought (it opens once by itself after an update)."),
+diff --git a/src/layout.rs b/src/layout.rs
+index 557cbc7..7843bfc 100644
+--- a/src/layout.rs
++++ b/src/layout.rs
+@@ -614,6 +614,11 @@ impl Node {
+         false
+     }
+ 
++    /// HUP: the id of the visible child of the stack `stack`.
++    pub fn active_child_id(&self, stack: &str) -> Option<String> {
++        self.find(stack)?.active_child().map(|c| c.id.clone())
++    }
++
+     /// The visible child of a stack.
+     pub fn active_child(&self) -> Option<&Node> {
+         match &self.kind {
+diff --git a/src/links.rs b/src/links.rs
+index 9307857..a66a7ee 100644
+--- a/src/links.rs
++++ b/src/links.rs
+@@ -111,6 +111,39 @@ pub fn resolve(link: &str, cwd: Option<&Path>) -> Option<Target> {
+     Path::new(bare).exists().then(|| Target::File(PathBuf::from(bare)))
+ }
+ 
++/// HUP: the local file or folder a target names: a path, or a `file:` URL
++/// (OSC 8 links from agents) on this machine, when it exists.
++pub fn local_path(target: &Target) -> Option<PathBuf> {
++    match target {
++        Target::File(p) => Some(p.clone()),
++        Target::Url(u) => {
++            let rest = u.strip_prefix("file://")?;
++            // `file:///p` or `file://localhost/p`; another host is not this machine.
++            let path = if rest.starts_with('/') { rest } else { rest.strip_prefix("localhost")? };
++            let path = path.split(['?', '#']).next()?;
++            let path = PathBuf::from(percent_decode(path)?);
++            path.exists().then_some(path)
++        }
++    }
++}
++
++fn percent_decode(s: &str) -> Option<String> {
++    let b = s.as_bytes();
++    let mut out = Vec::with_capacity(b.len());
++    let mut i = 0;
++    while i < b.len() {
++        if b[i] == b'%' && i + 2 < b.len() {
++            let hex = std::str::from_utf8(&b[i + 1..i + 3]).ok()?;
++            out.push(u8::from_str_radix(hex, 16).ok()?);
++            i += 3;
++        } else {
++            out.push(b[i]);
++            i += 1;
++        }
++    }
++    String::from_utf8(out).ok()
++}
++
+ /// Hands the target to the system (xdg-open, open on macOS, explorer on Windows).
+ pub fn open(target: &Target) {
+     let arg = match target {
+@@ -141,6 +174,21 @@ pub fn open(target: &Target) {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn file_urls_are_local_paths() {
++        let dir = std::env::temp_dir().join(format!("hup-links-{}", std::process::id()));
++        let file = dir.join("汉二密 PRD_V2.0.md");
++        std::fs::create_dir_all(&dir).unwrap();
++        std::fs::write(&file, "x").unwrap();
++        let encoded: String = file.to_str().unwrap().bytes().map(|b| if b.is_ascii_alphanumeric() || b"/._-".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
++        assert_eq!(local_path(&Target::Url(format!("file://{encoded}"))), Some(file.clone()));
++        assert_eq!(local_path(&Target::Url(format!("file://localhost{encoded}#L3"))), Some(file.clone()));
++        assert_eq!(local_path(&Target::Url(format!("file://other-host{encoded}"))), None);
++        assert_eq!(local_path(&Target::Url("https://example.com/a.md".into())), None);
++        assert_eq!(local_path(&Target::File(dir.clone())), Some(dir.clone()));
++        std::fs::remove_dir_all(&dir).unwrap();
++    }
++
+     fn first(text: &str) -> Option<&str> {
+         PATTERN.find(text).unwrap().map(|m| m.as_str())
+     }
+diff --git a/src/terminal.rs b/src/terminal.rs
+index dc1721c..a32b473 100644
+--- a/src/terminal.rs
++++ b/src/terminal.rs
+@@ -34,6 +34,8 @@ enum LinkTarget {
+ 
+ pub enum TerminalEvent {
+     Peek(String),
++    /// HUP: a link to a local file or folder was clicked; the window shows it in Files.
++    OpenFile(std::path::PathBuf),
+     TitleChanged,
+     /// The program ended.
+     Ended,
+@@ -1422,7 +1424,10 @@ impl Render for TerminalView {
+                     && let Some((target, _)) = this.link_at(ev.position)
+                 {
+                     match target {
+-                        LinkTarget::External(target) => links::open(&target),
++                        LinkTarget::External(target) => match links::local_path(&target) {
++                            Some(path) => cx.emit(TerminalEvent::OpenFile(path)),
++                            None => links::open(&target),
++                        },
+                         LinkTarget::Terminal(address) => cx.emit(TerminalEvent::Peek(address)),
+                     }
+                     return;
+diff --git a/src/window.rs b/src/window.rs
+index a1b7dd6..5322250 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -1398,6 +1398,7 @@ impl AppWindow {
+             let (block, addr) = (id.clone(), address.clone());
+             let sub = cx.subscribe_in(&view, window, move |this, _, ev: &TerminalEvent, window, cx| match ev {
+                 TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
++                TerminalEvent::OpenFile(path) => this.open_in_files(path.clone(), window, cx),
+                 TerminalEvent::TitleChanged => this.publish(cx),
+                 TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
+                 TerminalEvent::ContextMenu(at) => {
+@@ -3163,6 +3164,12 @@ impl AppWindow {
+             }
+             // HUP: native view inspection and actions for the test harness.
+             "native.debug" => self.answer(Ok(crate::native_view::debug())),
++            "native.open-link" => {
++                let Some(path) = Self::arg(a, "path").map(PathBuf::from).filter(|p| p.is_absolute() && p.exists()) else {
++                    return self.fail("native.open-link needs the absolute path of an existing file or folder");
++                };
++                self.open_in_files(path, window, cx);
++            }
+             "native.call" => {
+                 let (Some(key), Some(action)) = (Self::arg(a, "key"), Self::arg(a, "action")) else { return self.fail("native.call needs key and action") };
+                 let r = crate::native_view::call_key(&key, &action, a.get("args").unwrap_or(&Value::Null));
+@@ -3500,6 +3507,38 @@ impl AppWindow {
+         cx.notify();
+     }
+ 
++    /// HUP: shows a clicked file or folder link in the files-plus panel (bringing
++    /// its stack child forward), or hands it to the system when no such panel is laid out.
++    fn open_in_files(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
++        const FILES: &str = "files-plus";
++        let holds = |n: &Node| n.walk().iter().any(|b| matches!(b.content(), Some(Content::Mod { name, .. }) if name == FILES));
++        if !holds(&self.chrome) {
++            return crate::links::open(&crate::links::Target::File(path));
++        }
++        let slots: Vec<(String, String)> = self.chrome.walk().into_iter().filter_map(|s| match &s.kind {
++            Kind::Stack { children, .. } => children.iter().find(|c| holds(c)).map(|c| (s.id.clone(), c.id.clone())),
++            _ => None,
++        }).collect();
++        for (stack, child) in slots {
++            if self.chrome.active_child_id(&stack).as_deref() != Some(child.as_str()) {
++                self.run("layout.select", json!({ "stack": stack, "child": child }), window, cx);
++            }
++        }
++        cx.notify();
++        let command = format!("{}:{}", if path.is_dir() { "reveal" } else { "open" }, path.display());
++        // A panel just brought forward starts listening once it is drawn.
++        cx.spawn(async move |_, cx| {
++            for _ in 0..40 {
++                if cx.update(|_| mods::send_command(FILES, &command)) {
++                    return;
++                }
++                cx.background_executor().timer(Duration::from_millis(50)).await;
++            }
++            tracing::warn!("{FILES} did not take {command:?}; opening it with the system");
++            crate::links::open(&crate::links::Target::File(path));
++        }).detach();
++    }
++
+     fn peek_terminal(&mut self, address: &str, window: &mut Window, cx: &mut Context<Self>) {
+         self.close_overlay("terminal-peek", window, cx);
+         self.open_overlay("terminal-peek".into(), json!({
