@@ -7,6 +7,8 @@
 **2026-11-03：已开源**，见 D14。https://github.com/obqyuxi/herdr-universal-preview 。官方 issue #425 已按用户要求暂时撤回（D19），等功能完善后再重新提交。
 
 
+**2026-11-04：终端 Cmd+点击文件或文件夹链接，在 Files 面板中打开**（D23，补丁 0005）。已完成：上游单元测试 259 项通过，补丁可以干净应用，`check` 通过；在隔离开发版里用 `native.open-link` 自检了图片、文件夹外的中文名 md 和文件夹，并截图确认。真实的 Cmd+点击尚未经用户 GUI 验收。DD-up 已于当天重新安装（build `0.1.12-hup.349dd96`，在 DD-up 退出后安装，再重新打开，`status` 显示没有错误）。
+
 **用户 2026-11-02 收窄范围**：只要两件事，验收以这两件事为准。
 
 1. Files 面板点 Word/Excel/PPT/PDF/图片/音视频就能直接看（`mods/files-plus`）。

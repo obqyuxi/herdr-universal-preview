@@ -208,3 +208,10 @@
 - 那个 "Chromium Safe Storage" 条目是 agent-browser 下载的 Google Chrome for Testing（`~/.agent-browser/browsers/chrome-149…`）在 2026-06-26 建的。CEF 用的是同一个写死的名字，选 B 就等于和它共用一把钥匙。另外，它的访问名单里还有 7 项本项目的测试版，都是之前在弹窗里点了允许加进去的，用户可以在"钥匙串访问"里自行删掉。
 - 所有构建默认加 `--use-mock-keychain`：不弹窗，更新后网页也不会卡住；登录状态仍然保存在 DD-up 自己的资料目录里，靠 macOS 账户的文件权限保护。设置 `HUP_CHROMIUM_SYSTEM_KEYCHAIN=1` 可以改回用钥匙串。
 - 日用版此前没有启动过浏览器（`~/Library/Application Support/DD-up/Chromium` 不存在），所以没有丢失任何登录状态。
+
+## D23 终端里 Cmd+点击文件链接，在右侧 Files 面板打开（2026-11-04）
+
+- 用户要求：Claude Code 等 Agent 输出里的蓝色文件路径，按住 Cmd 点击后在右侧 Files（files-plus）里打开，不再交给 macOS 默认应用。
+- 宿主补丁 0005：点击的链接如果是本机上存在的文件或文件夹（普通路径，或 OSC 8 的 `file://` URL，会做百分号解码，并去掉 `#L3` 这类后缀），就把装着 files-plus 的那个栈切到前面，再发 `files-plus.open:<路径>` / `files-plus.reveal:<路径>`。面板刚切出来时还没在监听，所以每 50 ms 重试一次，最多 2 秒，超时后改用系统打开。布局里没有 files-plus 时，行为和以前一样。网址仍然交给系统打开。
+- files-plus：文件在当前文件夹内时，展开它所在的目录再预览；在文件夹外时按完整路径预览，标题只显示文件名。文件夹在当前文件夹内时在树里展开，在文件夹外时用 Finder 打开。点击可能刚把焦点换到另一个面板，导致根目录跟着变，所以 2 秒内会对新目录再执行一次。标题栏新增"用默认应用打开"，以前 Cmd+点击的效果仍然可以用到。
+- `native.open-link {path}` 走同一条路径，供脚本和自检使用。
