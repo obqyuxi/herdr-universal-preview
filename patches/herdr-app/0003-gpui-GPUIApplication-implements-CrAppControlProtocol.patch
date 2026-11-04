@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Mon, 2 Nov 2026 22:04:01 -0800
-Subject: [PATCH 3/5] gpui: GPUIApplication implements CrAppControlProtocol for
+Subject: [PATCH 3/6] gpui: GPUIApplication implements CrAppControlProtocol for
  Chromium (CEF)
 
 CEF requires NSApp to answer isHandlingSendEvent / setHandlingSendEvent:,
