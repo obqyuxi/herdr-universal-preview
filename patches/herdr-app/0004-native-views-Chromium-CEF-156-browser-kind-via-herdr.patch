@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Mon, 2 Nov 2026 22:22:26 -0800
-Subject: [PATCH 4/5] native views: Chromium (CEF 156) browser kind via
+Subject: [PATCH 4/6] native views: Chromium (CEF 156) browser kind via
  herdr-native-view
 
 Enables the chromium feature of herdr-native-view; regenerated
