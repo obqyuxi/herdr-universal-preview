@@ -222,3 +222,9 @@
 - 用户的 10 个 folder 和 10 个 space 基本一一对应，每个 space 也只有 1 个 tab，folder 只多出一层，没起到分组作用。
 - 用户的 `main-folders` 布局和官方 `main` 唯一的区别就是侧边栏用的 mod，所以改为 `scripts/install --layout-from main`，侧边栏用回自带的 `spaces`。这个基础布局会被记住，以后安装都用它。程序本身没变，也不需要退出 DD-up。
 - 恢复办法：`scripts/install --layout-from main-folders`，或者用备份 `~/.config/herdr-app/layouts/dd-up.json.backup-20261104-035100`。`~/.config/herdr-space-folders.json` 和 space-folders mod 都原样保留。
+
+## D25 右键终端里的文件链接，可以在 Finder 中显示（2026-11-05）
+
+- 用户要求：在 Agent 输出的文件路径上点右键，可以打开访达。
+- 宿主补丁 0007：右键时，如果鼠标下是本机上存在的文件或文件夹链接（判断方式和 D23 相同，`file://` URL 也算），就把路径作为 `target.link` 传给 pane 菜单。菜单最上面多一项 "Reveal in Finder"，下面加一条分隔线，执行的是 `native.reveal {path}`，也就是 `open -R`，在 Finder 里选中该文件。不在链接上右键时，菜单和以前一样。
+- 菜单改的是内置的 `defaults/mods/menu`。用户 `~/.config/herdr-app/mods/menu` 那一份没改过，`sync_defaults` 会随新版本更新它。官方 Herdr 不传 `link`，所以这一项不会出现在官方 Herdr 里。

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Mon, 2 Nov 2026 21:11:44 -0800
-Subject: [PATCH 2/6] native views for mods: nativeView element and
+Subject: [PATCH 2/7] native views for mods: nativeView element and
  native-view/0 functions
 
 The herdr module gains a nativeView(id, props) component plus
