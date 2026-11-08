@@ -1,11 +1,13 @@
 // Pairing (scan or paste the bridge's link) and the agent list, grouped like
 // the desktop sidebar: needs you, working, done, idle, other terminals.
-import { promptAction, router } from '@kit.ArkUI';
+import { LengthMetrics, promptAction, router } from '@kit.ArkUI';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
+import { notificationManager } from '@kit.NotificationKit';
 import { Conn, CONN_TEXT, Session, TermParams } from '../core/Session';
 import { Agent, Group, GROUP_TITLES } from '../core/Agents';
+import { PromptOption } from '../core/Prompt';
 import { parsePairLink } from '../core/Link';
 
 const GROUP_COLORS: string[] = ['#FFB547', '#4C9AFF', '#36C275', '#8A8F98', '#5C6068'];
@@ -18,6 +20,9 @@ class RowData {
   address: string = '';
   group: number = 0;
   when: string = '';
+  /// What a blocked agent asks, answerable right from the list.
+  question: string = '';
+  options: PromptOption[] = [];
 }
 
 function ago(ms: number): string {
@@ -55,7 +60,11 @@ function rowsOf(agents: Agent[]): RowData[] {
     r.title = folder ? `${a.label()} · ${folder}` : a.label();
     r.detail = a.detail();
     r.when = a.state ? ago(a.statusMs) : a.address;
-    r.key = `${a.address}|${g}|${r.title}|${r.detail}|${r.when}`;
+    if (g === Group.NeedsYou && a.prompt !== null) {
+      r.question = a.prompt.question;
+      r.options = a.prompt.options;
+    }
+    r.key = `${a.address}|${g}|${r.title}|${r.detail}|${r.when}|${r.options.map((o: PromptOption) => o.label).join('/')}`;
     out.push(r);
   }
   return out;
@@ -165,6 +174,7 @@ struct Index {
       buttons: [
         { text: '重新连接', color: '#4C9AFF' },
         { text: '测试推送', color: '#4C9AFF' },
+        { text: '通知设置', color: '#4C9AFF' },
         { text: '移除这台 Mac', color: '#FF5D5D' }
       ]
     }).then((r: promptAction.ActionMenuSuccessResponse) => {
@@ -181,6 +191,10 @@ struct Index {
           promptAction.showToast({ message: e.message, duration: 6000 });
         });
       } else if (r.index === 2) {
+        notificationManager.openNotificationSettings(getContext(this) as common.UIAbilityContext).catch((e: BusinessError) => {
+          promptAction.showToast({ message: `打不开通知设置：${e.message}` });
+        });
+      } else if (r.index === 3) {
         Session.shared.forget();
       }
     }).catch(() => {});
@@ -221,6 +235,9 @@ struct Index {
             .fontSize(12).fontColor('#9AA0A6').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Button('+').fontSize(24).backgroundColor(Color.Transparent).fontColor('#E6E6E6')
+        .enabled(this.conn === Conn.Ready)
+        .onClick(() => router.pushUrl({ url: 'pages/NewTask' }))
       Button('⋯').fontSize(20).backgroundColor(Color.Transparent).fontColor('#E6E6E6')
         .onClick(() => this.menu())
     }
@@ -229,17 +246,47 @@ struct Index {
 
   @Builder
   agentRow(r: RowData) {
-    Row({ space: 12 }) {
-      Circle().width(10).height(10).fill(GROUP_COLORS[r.group])
-      Column({ space: 2 }) {
-        Text(r.title).fontSize(16).fontColor('#E6E6E6').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(r.detail).fontSize(13).fontColor(r.group === Group.NeedsYou ? '#FFB547' : '#9AA0A6')
-          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Text(r.when).fontSize(11).fontColor('#6B7075')
+    Column({ space: 8 }) {
+      Row({ space: 12 }) {
+        Circle().width(10).height(10).fill(GROUP_COLORS[r.group])
+        Column({ space: 2 }) {
+          Text(r.title).fontSize(16).fontColor('#E6E6E6').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(r.question ? r.question : r.detail).fontSize(13).fontColor(r.group === Group.NeedsYou ? '#FFB547' : '#9AA0A6')
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text(r.when).fontSize(11).fontColor('#6B7075')
+      }.width('100%')
+      if (r.options.length > 0) {
+        // Answer without opening the terminal (free-text answers open it).
+        Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(6), cross: LengthMetrics.vp(6) } }) {
+          ForEach(r.options.slice(0, 4), (o: PromptOption) => {
+            Text(`${o.index}. ${o.label}`).fontSize(13).fontColor('#E6E6E6').maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: 220 })
+              .padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(14).backgroundColor('#2C2618')
+              .onClick(() => this.answer(r, o))
+          }, (o: PromptOption) => `${o.index}`)
+          if (r.options.length > 4) {
+            Text(`还有 ${r.options.length - 4} 项`).fontSize(12).fontColor('#9AA0A6')
+              .padding({ left: 8, right: 8, top: 7, bottom: 7 })
+              .onClick(() => this.open(r.address))
+          }
+        }.padding({ left: 22 })
+      }
     }
     .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .onClick(() => this.open(r.address))
+  }
+
+  private answer(r: RowData, o: PromptOption): void {
+    if (o.freeText) {
+      this.open(r.address);
+      return;
+    }
+    Session.shared.answer(r.address, o.index).then(() => {
+      promptAction.showToast({ message: `已选：${o.label}` });
+    }).catch((e: Error) => {
+      promptAction.showToast({ message: e.message });
+    });
   }
 
   @Builder

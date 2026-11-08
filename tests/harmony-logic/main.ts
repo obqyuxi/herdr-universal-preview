@@ -7,6 +7,7 @@ import { clientKeys, x25519Private, XKey, Records } from './Crypto.ts';
 import { parsePairLink } from './Link.ts';
 import { Session, Conn } from './Session.ts';
 import { Group } from './Agents.ts';
+import { parsePrompt, keysFor } from './Prompt.ts';
 
 let fail = 0;
 setTimeout(() => { console.log('FAIL timed out (60 s)'); process.exit(1); }, 60000).unref();
@@ -42,6 +43,26 @@ recs.push(new Uint8Array([8, 0, 0]));
 const one = recs.pop();
 check('records split correctly', one !== null && equal(one, new Uint8Array([7, 8])) && recs.pop() === null);
 
+// 1b. Reading what a blocked agent asks, off its screen.
+const scr = (n: string) => readFileSync(new URL(`./screens/${n}.txt`, import.meta.url), 'utf8');
+const q = parsePrompt(scr('claude-question'));
+check('question: six options, first highlighted', q.kind === 'choice' && q.options.length === 6 && q.current === 1, JSON.stringify(q.options.map((o) => o.label)));
+check('question text found', q.question.startsWith('界面改版先拿哪个页面试点'), q.question);
+check('option details kept', q.options[0].detail.includes('表格+筛选'), q.options[0].detail);
+check('"Type something." is free text', q.options[4].freeText && !q.options[0].freeText);
+check('choosing 3 moves down twice then enter', JSON.stringify(keysFor(q, 3)) === '["down","down","enter"]');
+check('free text only moves the highlight', JSON.stringify(keysFor(q, 5)) === '["down","down","down","down"]');
+const perm = parsePrompt(scr('claude-permission'));
+check('permission: three options in a box', perm.options.length === 3 && perm.options[1].label.startsWith("Yes, and don't ask again"), JSON.stringify(perm.options.map((o) => o.label)));
+check('permission question', perm.question === 'Do you want to proceed?', perm.question);
+check('"No, and tell Claude" is free text without (esc)', perm.options[2].freeText && !perm.options[2].label.includes('(esc)'), perm.options[2].label);
+const yn = parsePrompt(scr('yesno'));
+check('y/n prompt', yn.kind === 'yesno' && JSON.stringify(keysFor(yn, 2)) === '["n","enter"]');
+const inl = parsePrompt('第 1 轮完成\n要继续下一轮吗？ 1) 继续  2) 停下  > ');
+check('inline options on one line', inl.options.length === 2 && inl.options[1].label === '停下' && inl.question === '要继续下一轮吗？', JSON.stringify(inl));
+check('no highlight: type the number', JSON.stringify(keysFor(parsePrompt('要继续吗？ 1) 继续  2) 停下  > '), 2)) === '["2","enter"]');
+check('plain output has no prompt', parsePrompt('just some\noutput 1. not a menu\n').kind === 'none');
+
 // 2. The session against the live bridge.
 const s = Session.shared;
 await s.start(); // nothing saved yet
@@ -56,6 +77,15 @@ check('fake agent groups as needing you, working, done or idle', await until('st
 }), String(s.agents.get(agentT)?.group()));
 const seenBlocked = await until('blocked', () => s.agents.get(agentT)?.group() === Group.NeedsYou, 8000);
 check('a blocked agent shows under needs you', seenBlocked);
+check('its question is read off the screen', await until('prompt', () => (s.agents.get(agentT)?.prompt?.options.length ?? 0) === 2), JSON.stringify(s.agents.get(agentT)?.prompt));
+
+// Files beside a terminal, commands, reading files.
+const put = await s.put(agentT, 'note.txt', utf8('附件内容'));
+check('put lands a file beside the terminal', put.endsWith('note.txt'), put);
+const catOut = await s.exec(`cat '${put}'`, null);
+check('exec runs a shell line and returns its bytes', catOut.code === 0 && fromUtf8(catOut.stdout) === '附件内容', fromUtf8(catOut.stdout));
+const rf = await s.readFile(put, null, 10);
+check('readFile reads text', rf.text === '附件内容', JSON.stringify(rf));
 
 // Attach to the cat terminal and type into it through terminal.send.
 const cat = s.agents.get(catT);
@@ -75,6 +105,10 @@ await s.sendText(catT, 'hello-from-harmony', false);
 check('sent text comes back on the stream', await until('echo', () => screen.includes('hello-from-harmony')));
 await s.keys(catT, ['ctrl+c']);
 s.detach(ch);
+
+// Answering the agent's question with the parsed option (it reads a typed number).
+await s.answer(agentT, 1);
+check('answering continues the agent', await until('answered', () => s.agents.get(agentT)?.group() !== Group.NeedsYou || (s.agents.get(agentT)?.turn ?? 0) > 1, 8000));
 
 // herdr.seen goes up when a person looks.
 const a = s.agents.get(agentT)!;

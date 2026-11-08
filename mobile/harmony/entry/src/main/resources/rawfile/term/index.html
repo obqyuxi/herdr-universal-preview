@@ -24,7 +24,7 @@
 //   made glyphs overlap), double-tap for 1:1 with scrolling.
 // Input never goes through xterm (no soft keyboard here); the app's quick keys
 // and text box send it.
-const FONT = 12;
+let FONT = 12;
 const wrap = document.getElementById('wrap');
 const box = document.getElementById('t');
 let term = null;
@@ -87,6 +87,77 @@ function report() {
   }
 }
 
+// Pinch to change the font size; in phone mode the terminal then re-fits (more or fewer columns).
+let pinch = null;
+function dist(t) { const dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY; return Math.hypot(dx, dy); }
+document.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) pinch = { d: dist(e.touches), font: FONT };
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (!pinch || e.touches.length !== 2) return;
+  const f = Math.max(7, Math.min(22, Math.round(pinch.font * dist(e.touches) / pinch.d)));
+  if (f !== term.options.fontSize) { term.options.fontSize = f; place(); }
+}, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (!pinch || e.touches.length > 0) return;
+  FONT = term.options.fontSize;
+  pinch = null;
+  if (port) port.postMessage(JSON.stringify({ t: 'font', size: FONT }));
+  sent = '';
+  report();
+  place();
+}, { passive: true });
+
+// A tap on a file path opens it in the app's preview. Rows the terminal wrapped are
+// joined first, so a long path broken across lines still works.
+const PATH = /(?:~|\.{1,2})?\/?[\w@.+\-\u4e00-\u9fff]+(?:\/[\w@.+\-\u4e00-\u9fff]+)*\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+)?|(?:~|\/)[\w@.+\-\u4e00-\u9fff\/]{2,}/g;
+function pathAt(col, row) {
+  const buf = term.buffer.active;
+  let start = row;
+  while (start > 0 && buf.getLine(start) && buf.getLine(start).isWrapped) start--;
+  let text = '', offsets = [], y = start;
+  for (;;) {
+    const line = buf.getLine(y);
+    if (!line) break;
+    offsets.push([y, text.length]);
+    text += line.translateToString(true).padEnd(y === row ? col + 1 : 0);
+    const next = buf.getLine(y + 1);
+    if (!next || !next.isWrapped) break;
+    y++;
+  }
+  const rowStart = (offsets.find((o) => o[0] === row) || [row, 0])[1];
+  const at = rowStart + col;
+  PATH.lastIndex = 0;
+  let m;
+  while ((m = PATH.exec(text)) !== null) {
+    if (at >= m.index && at < m.index + m[0].length) {
+      const p = m[0].replace(/[.,;:)]+$/, '');
+      return (p.includes('/') || /\.[A-Za-z]/.test(p)) && p.length > 2 ? p : null;
+    }
+  }
+  return null;
+}
+let downAt = null;
+document.addEventListener('touchstart', (e) => {
+  downAt = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() } : null;
+}, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (!downAt || !term || !port || e.changedTouches.length !== 1) return;
+  const t = e.changedTouches[0];
+  const moved = Math.abs(t.clientX - downAt.x) + Math.abs(t.clientY - downAt.y);
+  if (moved > 10 || Date.now() - downAt.t > 350) return;
+  const screen = box.querySelector('.xterm-screen');
+  if (!screen) return;
+  const r = screen.getBoundingClientRect();
+  const c = cell();
+  const k = r.width / (term.cols * c.w) || 1;
+  const col = Math.floor((t.clientX - r.left) / (c.w * k));
+  const row = Math.floor((t.clientY - r.top) / (c.h * k)) + term.buffer.active.viewportY;
+  if (col < 0 || col >= term.cols || row < 0) return;
+  const p = pathAt(col, row);
+  if (p) port.postMessage(JSON.stringify({ t: 'open', path: p }));
+}, { passive: true });
+
 function place() {
   if (mode === 'full' && !zoomed) {
     const c = cell();
@@ -110,6 +181,7 @@ function onMessage(ev) {
   try { m = JSON.parse(d); } catch (e) { return; }
   if (m.t === 'init') {
     mode = m.mode || 'phone';
+    if (m.font && m.font !== FONT) { FONT = m.font; term.options.fontSize = FONT; sent = ''; report(); }
     zoomed = false;
     term.reset();
     term.resize(m.cols, m.rows);

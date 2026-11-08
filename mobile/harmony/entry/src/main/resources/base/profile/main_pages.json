@@ -1,1 +1,1 @@
-{ "src": ["pages/Index", "pages/Terminal"] }
+{ "src": ["pages/Index", "pages/Terminal", "pages/Preview", "pages/NewTask"] }

@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; background: #101114; color: #e6e6e6; font: 15px/1.6 -apple-system, "HarmonyOS Sans SC", sans-serif; }
+  #c { padding: 12px 14px 40px; }
+  pre, code { font-family: "HarmonyOS Sans Mono", "Noto Sans Mono CJK SC", monospace; font-size: 12.5px; }
+  .md pre { background: #1c1e23; padding: 10px; border-radius: 8px; overflow-x: auto; }
+  .md code { background: #1c1e23; padding: 1px 4px; border-radius: 4px; }
+  .md pre code { padding: 0; }
+  .md a { color: #6aa8ff; }
+  .md table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid #2a2d33; padding: 4px 8px; }
+  .md img { max-width: 100%; }
+  .md blockquote { margin: 0; padding-left: 12px; border-left: 3px solid #3a3d44; color: #9aa0a6; }
+  .code { overflow-x: auto; white-space: pre; line-height: 1.5; font-family: "HarmonyOS Sans Mono", "Noto Sans Mono CJK SC", "Droid Sans Mono", monospace; font-size: 12.5px; }
+  .ln { display: inline-block; width: 3.2em; color: #555a62; user-select: none; text-align: right; margin-right: 10px; }
+  .add { background: #12301d; color: #b6f0c4; display: block; }
+  .del { background: #3a1618; color: #ffc2c2; display: block; }
+  .hunk { color: #6aa8ff; display: block; margin-top: 6px; }
+  .meta { color: #8a8f98; display: block; }
+  .row { display: block; }
+  img.full { max-width: 100%; display: block; margin: 0 auto; }
+  iframe { width: 100%; height: 90vh; border: 0; background: #fff; border-radius: 6px; }
+  .note { color: #8a8f98; padding: 30px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div id="c"><div class="note">正在读取…</div></div>
+<script src="marked.umd.js"></script>
+<script>
+// Renders what the app sends over a WebMessagePort:
+// {"kind":"markdown"|"text"|"diff"|"html"|"image"|"note", "text"?, "data"?, "name"?}
+const c = document.getElementById('c');
+const esc = (s) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+// Raw HTML inside markdown is shown as text, never run.
+marked.use({ renderer: { html(t) { return esc(typeof t === 'string' ? t : (t.text || '')); } } });
+
+function lines(text, cls) {
+  const out = [];
+  text.split('\n').forEach((l, i) => {
+    let k = 'row';
+    if (cls === 'diff') {
+      if (l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ')) k = 'meta';
+      else if (l.startsWith('@@')) k = 'hunk';
+      else if (l.startsWith('+')) k = 'add';
+      else if (l.startsWith('-')) k = 'del';
+      out.push(`<span class="${k}">${esc(l) || ' '}</span>`);
+    } else {
+      out.push(`<span class="row"><span class="ln">${i + 1}</span>${esc(l)}</span>`);
+    }
+  });
+  return `<div class="code">${out.join('')}</div>`;
+}
+
+function show(m) {
+  window.scrollTo(0, 0);
+  if (m.kind === 'markdown') c.innerHTML = `<div class="md">${marked.parse(m.text || '')}</div>`;
+  else if (m.kind === 'diff') c.innerHTML = lines(m.text || '', 'diff');
+  else if (m.kind === 'text') c.innerHTML = lines(m.text || '', 'text');
+  else if (m.kind === 'image') c.innerHTML = `<img class="full" src="${m.data}">`;
+  else if (m.kind === 'html') {
+    // No scripts: a sandboxed frame with the page's markup only.
+    const f = document.createElement('iframe');
+    f.setAttribute('sandbox', '');
+    f.srcdoc = m.text || '';
+    c.innerHTML = '';
+    c.appendChild(f);
+  } else c.innerHTML = `<div class="note">${esc(m.text || '')}</div>`;
+}
+
+window.addEventListener('message', (e) => {
+  if (e.data === '__init_port__' && e.ports && e.ports[0]) {
+    const port = e.ports[0];
+    port.onmessage = (ev) => { try { show(JSON.parse(ev.data)); } catch (err) { show({ kind: 'note', text: String(err) }); } };
+    port.postMessage('ready');
+  }
+});
+</script>
+</body>
+</html>

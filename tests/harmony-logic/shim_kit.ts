@@ -24,7 +24,11 @@ class TextDecoderShim {
     return Buffer.from(b).toString('utf8');
   }
 }
-export const util = { TextEncoder: TextEncoderShim, TextDecoder: TextDecoderShim };
+class Base64HelperShim {
+  encodeToStringSync(b: Uint8Array): string { return Buffer.from(b).toString('base64'); }
+  decodeSync(s: string): Uint8Array { return new Uint8Array(Buffer.from(s, 'base64')); }
+}
+export const util = { TextEncoder: TextEncoderShim, TextDecoder: TextDecoderShim, Base64Helper: Base64HelperShim };
 
 // ---------- @kit.CryptoArchitectureKit ----------
 type Blob = { data: Uint8Array };

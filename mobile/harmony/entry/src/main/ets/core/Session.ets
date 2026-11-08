@@ -2,11 +2,13 @@
 // Mac), the core's events, reconnecting when the app returns to the
 // foreground, push registration, and the calls the pages make.
 import { deviceInfo } from '@kit.BasicServicesKit';
-import { b64urlDecode, b64urlEncode } from './Bytes';
+import { b64urlDecode, b64urlEncode, fromUtf8 } from './Bytes';
 import { ControlMsg, SecureSocket } from './Secure';
 import { HcClient, HelloResult, LineSplitter, RESIZE, StreamSink } from './Hc';
 import { Agent, AgentStore, EventLine, SubscribeResult } from './Agents';
 import { PairLink, wsUrl } from './Link';
+import { keysFor, parsePrompt, PromptInfo } from './Prompt';
+import { util } from '@kit.ArkTS';
 import { forgetMachine, loadMachine, MachineData, saveMachine } from './Vault';
 
 export enum Conn {
@@ -75,6 +77,101 @@ class KeysParams {
     this.terminal = terminal;
     this.keys = keys;
   }
+}
+
+class ReadParams {
+  terminal: string;
+  lines: number;
+
+  constructor(terminal: string, lines: number) {
+    this.terminal = terminal;
+    this.lines = lines;
+  }
+}
+
+class PutParams {
+  terminal: string;
+  name: string;
+  data: string;
+
+  constructor(terminal: string, name: string, data: string) {
+    this.terminal = terminal;
+    this.name = name;
+    this.data = data;
+  }
+}
+
+class ExecParams {
+  line: string;
+  cwd: string | null;
+  timeout: number;
+
+  constructor(line: string, cwd: string | null, timeout: number) {
+    this.line = line;
+    this.cwd = cwd;
+    this.timeout = timeout;
+  }
+}
+
+class FileReadParams {
+  path: string;
+  cwd: string | null;
+  limit: number;
+
+  constructor(path: string, cwd: string | null, limit: number) {
+    this.path = path;
+    this.cwd = cwd;
+    this.limit = limit;
+  }
+}
+
+class RunParams {
+  line: string;
+  cwd: string;
+  env: Record<string, string>;
+  labels: Record<string, string>;
+
+  constructor(line: string, cwd: string, env: Record<string, string>) {
+    this.line = line;
+    this.cwd = cwd;
+    this.env = env;
+    this.labels = { 'herdr.seen': '0' };
+  }
+}
+
+export interface ReadResult {
+  text?: string;
+}
+
+export interface PutResult {
+  path?: string;
+  bytes?: number;
+}
+
+export interface ExecResult {
+  code?: number | null;
+  stdout?: string;
+  stderr?: string;
+  timed_out?: boolean;
+  truncated?: boolean;
+}
+
+export interface FileReadResult {
+  text?: string;
+  lines?: number;
+  last?: number;
+}
+
+export interface RunResult {
+  address?: string;
+}
+
+/// machine.exec output, decoded.
+export class ExecOutput {
+  code: number = -1;
+  stdout: Uint8Array = new Uint8Array(0);
+  stderr: string = '';
+  timedOut: boolean = false;
 }
 
 class LabelParams {
@@ -263,6 +360,7 @@ export class Session {
     this.coreVersion = hello.version ?? '';
     const sub = (await hc.call('events.subscribe', new EmptyParams())) as SubscribeResult;
     this.agents.snapshot(sub.seq ?? 0, sub.terminals ?? []);
+    this.readPrompts();
     if (sub.channel !== undefined && sub.channel !== null) {
       const ch = sub.channel;
       const lines = new LineSplitter();
@@ -275,6 +373,7 @@ export class Session {
           hc.credit(ch, b.length);
           if (changed) {
             this.changed();
+            this.readPrompts();
           }
         },
         resize: (cols: number, rows: number) => {},
@@ -284,6 +383,7 @@ export class Session {
     }
     this.conn = Conn.Ready;
     this.retryDelay = 2000;
+    this.readPrompts();
     sock.sendControl({ t: 'foreground', on: this.foreground });
     if (this.pushToken) {
       sock.sendControl({ t: 'push_token', token: this.pushToken });
@@ -459,6 +559,98 @@ export class Session {
 
   async interrupt(address: string): Promise<void> {
     await this.client().call('terminal.interrupt', new TerminalParam(address));
+  }
+
+  /// Read what each newly blocked agent asks (its screen), once per block.
+  private readPrompts(): void {
+    for (const a of this.agents.list()) {
+      if (a.state === 'blocked' && a.promptFor !== a.statusMs) {
+        a.promptFor = a.statusMs;
+        this.refreshPrompt(a.address);
+      }
+    }
+  }
+
+  /// Re-read a blocked agent's screen and parse its question.
+  /// An agent says "blocked" a moment before it finishes drawing the question,
+  /// so an empty read is tried again a little later.
+  refreshPrompt(address: string, attempt?: number): void {
+    const hc = this.hc;
+    const n = attempt ?? 0;
+    if (hc === null || this.conn !== Conn.Ready) {
+      // Not connected yet: try again once it is (readPrompts runs on Ready).
+      const a = this.agents.get(address);
+      if (a !== undefined) {
+        a.promptFor = -1;
+      }
+      return;
+    }
+    hc.call('terminal.read', new ReadParams(address, 0)).then((r: Object) => {
+      const a = this.agents.get(address);
+      if (a === undefined || a.state !== 'blocked') {
+        return;
+      }
+      const p = parsePrompt((r as ReadResult).text ?? '');
+      a.prompt = p.kind === 'none' ? null : p;
+      this.changed();
+      if (p.kind === 'none' && n < 2) {
+        setTimeout(() => this.refreshPrompt(address, n + 1), n === 0 ? 600 : 1500);
+      }
+    }).catch((): void => {});
+  }
+
+  /// Answer a blocked agent's question: move to the option and press enter.
+  async answer(address: string, option: number): Promise<void> {
+    const a = this.agents.get(address);
+    const p: PromptInfo | null = a?.prompt ?? null;
+    if (a === undefined || p === null) {
+      throw new Error('没有待回答的问题');
+    }
+    await this.keys(address, keysFor(p, option));
+    // The screen moves on (or asks again): read it once it settles.
+    a.promptFor = -1;
+    setTimeout(() => this.refreshPrompt(address), 900);
+  }
+
+  /// Put a file beside a terminal (where its agent can read it); returns its path on the Mac.
+  async put(address: string, name: string, bytes: Uint8Array): Promise<string> {
+    const data = new util.Base64Helper().encodeToStringSync(bytes);
+    const r = (await this.client().call('terminal.put', new PutParams(address, name, data))) as PutResult;
+    return r.path ?? '';
+  }
+
+  /// Run a shell line on the Mac (git, ls, cat ...).
+  async exec(line: string, cwd: string | null, timeout?: number): Promise<ExecOutput> {
+    const r = (await this.client().call('machine.exec', new ExecParams(line, cwd, timeout ?? 30))) as ExecResult;
+    const out = new ExecOutput();
+    const b64 = new util.Base64Helper();
+    out.code = r.code ?? -1;
+    out.stdout = r.stdout ? b64.decodeSync(r.stdout) : new Uint8Array(0);
+    out.stderr = r.stderr ? fromUtf8(b64.decodeSync(r.stderr)) : '';
+    out.timedOut = r.timed_out ?? false;
+    return out;
+  }
+
+  async readFile(path: string, cwd: string | null, limit: number): Promise<FileReadResult> {
+    return (await this.client().call('file.read', new FileReadParams(path, cwd, limit))) as FileReadResult;
+  }
+
+  /// Start a program in a new terminal through the login shell (so PATH has the user's tools).
+  async run(line: string, cwd: string, env: Record<string, string>): Promise<string> {
+    const r = (await this.client().call('terminal.run', new RunParams(line, cwd, env))) as RunResult;
+    return r.address ?? '';
+  }
+
+  /// Folders terminals run in, the most recently active first.
+  recentFolders(): string[] {
+    const seen: string[] = [];
+    const list = this.agents.list().slice().sort((x: Agent, y: Agent) => y.statusMs - x.statusMs);
+    for (const a of list) {
+      if (a.cwd && !seen.includes(a.cwd)) {
+        seen.push(a.cwd);
+      }
+    }
+    return seen;
   }
 
   /// docs/labels.md: raise herdr.seen to the turn a person is looking at.

@@ -41,6 +41,7 @@ for f in src.glob("*.ets"):
     (dst / (f.stem + ".ts")).write_text(s)
 PY
 cp "$root/tests/harmony-logic/shim_kit.ts" "$root/tests/harmony-logic/main.ts" "$work/src/"
+cp -R "$root/tests/harmony-logic/screens" "$work/src/"
 
 port=17843
 python3 -I -c 'import json,sys; json.dump({"listen": "127.0.0.1:"+sys.argv[2], "hc": sys.argv[3], "session": sys.argv[4]}, open(sys.argv[1], "w"))' \
@@ -59,6 +60,6 @@ grep -q listening "$log" || { cat "$log"; exit 1; }
 
 addr() { python3 -I -c 'import json,sys;print(json.load(sys.stdin)["address"])'; }
 cat_t=$("$root/scripts/dev" hc run --bg --json -- cat | addr)
-agent=$("$root/scripts/dev" hc run --bg --json -- "$root/tests/fixtures/fake-agent.sh" | addr)
+agent=$("$root/scripts/dev" hc run --bg --json -- "$root/tests/fixtures/phone-agent.sh" | addr)
 link=$("$bin" --state-dir "$work/state" pair --host 127.0.0.1 --link-only)
 (cd "$work/src" && node --no-warnings main.ts "$root/bridge/testdata/vectors.json" "$link" "$agent" "$cat_t") || { echo "--- bridge log ($log)"; tail -20 "$log"; exit 1; }

@@ -1,3 +1,5 @@
+import { PromptInfo } from './Prompt';
+
 // Terminals and agents from events.subscribe, grouped the way every Herdr
 // client shows them (.work/herdr-app/docs/labels.md): blocked/error needs
 // you, working, done (turn > herdr.seen), idle; terminals that never
@@ -88,6 +90,10 @@ export class Agent {
   cols: number = 80;
   rows: number = 24;
   argv0: string = '';
+  /// What it asks while blocked, read off its screen; null until read (or not blocked).
+  prompt: PromptInfo | null = null;
+  /// The statusMs the prompt was read for (a new block reads again).
+  promptFor: number = -1;
 
   static from(r: TermRec): Agent {
     const a = new Agent();
@@ -106,6 +112,10 @@ export class Agent {
   }
 
   setStatus(s: StatusRec | null, ms: number | null): void {
+    if ((s?.state ?? '') !== 'blocked') {
+      this.prompt = null;
+      this.promptFor = -1;
+    }
     this.state = s?.state ?? '';
     this.app = s?.app ?? this.app;
     this.msg = s?.msg ?? s?.title ?? '';
