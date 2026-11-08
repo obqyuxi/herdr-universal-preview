@@ -37,6 +37,9 @@ pub struct Item {
     pub id: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub err: bool,
+    /// Byte offset of the log line it came from (for loading earlier parts).
+    #[serde(rename = "o")]
+    pub off: u64,
 }
 
 #[derive(Serialize, Debug)]
@@ -47,6 +50,10 @@ pub struct Page {
     pub reset: bool,
     /// Earlier parts of the session were left out (only the end was read).
     pub truncated: bool,
+    /// Where the lines read begin; ask with `before` = this for the part before it.
+    pub start: u64,
+    /// These items come before what the phone has (a `before` request).
+    pub older: bool,
     pub items: Vec<Item>,
 }
 
@@ -151,42 +158,83 @@ pub fn locate(home: &Path, app: &str, cwd: &str, pid: Option<u32>) -> Option<Pat
     exact.or_else(|| if codex { newest_codex(home, cwd) } else { newest_claude(home, cwd) })
 }
 
-pub fn read(app: &str, cwd: &str, pid: Option<u32>, file: Option<&str>, offset: Option<u64>) -> Result<Page> {
-    read_in(&home(), app, cwd, pid, file, offset)
+pub fn read(app: &str, cwd: &str, pid: Option<u32>, file: Option<&str>, offset: Option<u64>, before: Option<u64>) -> Result<Page> {
+    read_in(&home(), app, cwd, pid, file, offset, before)
 }
 
-pub fn read_in(home: &Path, app: &str, cwd: &str, pid: Option<u32>, file: Option<&str>, offset: Option<u64>) -> Result<Page> {
-    let Some(path) = locate(home, app, cwd, pid) else { bail!("没找到这个目录的会话记录（{app}）") };
-    let name = path.to_string_lossy().into_owned();
-    let len = fs::metadata(&path)?.len();
-    let same = file == Some(name.as_str()) && offset.is_some_and(|o| o <= len);
-    let (start, reset) = if same { (offset.unwrap_or(0), false) } else { (len.saturating_sub(FIRST_WINDOW), true) };
-    let end = len.min(start + MORE_WINDOW);
-    let mut f = fs::File::open(&path)?;
-    f.seek(SeekFrom::Start(start))?;
-    let mut buf = vec![0u8; (end - start) as usize];
-    f.read_exact(&mut buf)?;
-    // From the middle of the file: begin at the next whole line.
-    let mut from = 0;
-    if reset && start > 0 {
-        from = buf.iter().position(|b| *b == b'\n').map_or(buf.len(), |i| i + 1);
-    }
-    // Stop after the last whole line (the agent may be writing the next).
-    let upto = buf.iter().rposition(|b| *b == b'\n').map_or(from, |i| i + 1).max(from);
-    let codex = app.contains("codex");
+/// Parse whole lines of `buf` (which begins at byte `base` of the file).
+fn parse(buf: &[u8], base: u64, codex: bool) -> Vec<Item> {
     let mut items = vec![];
-    for line in buf[from..upto].split(|b| *b == b'\n') {
+    let mut at = 0usize;
+    for line in buf.split(|b| *b == b'\n') {
+        let off = base + at as u64;
+        at += line.len() + 1;
         if line.is_empty() {
             continue;
         }
         let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
-        if codex { codex_items(&v, &mut items) } else { claude_items(&v, &mut items) }
+        let n = items.len();
+        if codex {
+            codex_items(&v, &mut items)
+        } else {
+            claude_items(&v, &mut items)
+        }
+        for it in &mut items[n..] {
+            it.off = off;
+        }
     }
-    let truncated = reset && start > 0;
-    if items.len() > MAX_ITEMS {
-        items.drain(..items.len() - MAX_ITEMS);
+    items
+}
+
+/// Keep the last MAX_ITEMS, cut at a line boundary; returns where the kept lines begin.
+fn keep_last(items: &mut Vec<Item>, start: u64) -> u64 {
+    if items.len() <= MAX_ITEMS {
+        return start;
     }
-    Ok(Page { file: name, offset: start + upto as u64, reset, truncated, items })
+    let mut cut = items.len() - MAX_ITEMS;
+    while cut < items.len() && items[cut].off == items[cut - 1].off {
+        cut += 1;
+    }
+    items.drain(..cut);
+    items.first().map_or(start, |i| i.off)
+}
+
+fn read_range(path: &Path, from: u64, to: u64) -> Result<Vec<u8>> {
+    let mut f = fs::File::open(path)?;
+    f.seek(SeekFrom::Start(from))?;
+    let mut buf = vec![0u8; (to - from) as usize];
+    f.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
+pub fn read_in(home: &Path, app: &str, cwd: &str, pid: Option<u32>, file: Option<&str>, offset: Option<u64>, before: Option<u64>) -> Result<Page> {
+    let Some(path) = locate(home, app, cwd, pid) else { bail!("没找到这个目录的会话记录（{app}）") };
+    let name = path.to_string_lossy().into_owned();
+    let len = fs::metadata(&path)?.len();
+    let codex = app.contains("codex");
+    let same_file = file == Some(name.as_str());
+
+    // The part before what the phone already shows.
+    if let Some(b) = before.filter(|b| same_file && *b <= len) {
+        let s = b.saturating_sub(FIRST_WINDOW);
+        let buf = read_range(&path, s, b)?;
+        // Begin at a whole line (the window's end already is one).
+        let skip = if s > 0 { buf.iter().position(|c| *c == b'\n').map_or(buf.len(), |i| i + 1) } else { 0 };
+        let mut items = parse(&buf[skip..], s + skip as u64, codex);
+        let start = keep_last(&mut items, s + skip as u64);
+        return Ok(Page { file: name, offset: offset.unwrap_or(len), reset: false, truncated: start > 0, start, older: true, items });
+    }
+
+    let same = same_file && offset.is_some_and(|o| o <= len);
+    let (s, reset) = if same { (offset.unwrap_or(0), false) } else { (len.saturating_sub(FIRST_WINDOW), true) };
+    let buf = read_range(&path, s, len.min(s + MORE_WINDOW))?;
+    // From the middle of the file: begin at the next whole line.
+    let from = if reset && s > 0 { buf.iter().position(|b| *b == b'\n').map_or(buf.len(), |i| i + 1) } else { 0 };
+    // Stop after the last whole line (the agent may be writing the next).
+    let upto = buf.iter().rposition(|b| *b == b'\n').map_or(from, |i| i + 1).max(from);
+    let mut items = parse(&buf[from..upto], s + from as u64, codex);
+    let start = keep_last(&mut items, s + from as u64);
+    Ok(Page { file: name, offset: s + upto as u64, reset, truncated: reset && start > 0, start, older: false, items })
 }
 
 /// A one-line summary of a tool call and the longer detail behind it.
@@ -255,7 +303,7 @@ pub fn claude_items(v: &Value, out: &mut Vec<Item>) {
         return;
     }
     let content = &v["message"]["content"];
-    let item = |k: &'static str, text: String| Item { k, text, name: String::new(), detail: String::new(), id: String::new(), err: false };
+    let item = |k: &'static str, text: String| Item { off: 0, k, text, name: String::new(), detail: String::new(), id: String::new(), err: false };
     if let Some(text) = content.as_str() {
         if kind == "user" && is_person_text(text) {
             out.push(item("user", clip(text, TEXT_MAX)));
@@ -274,6 +322,7 @@ pub fn claude_items(v: &Value, out: &mut Vec<Item>) {
             }
             ("user", "image") => out.push(item("user", "[图片]".into())),
             ("user", "tool_result") => out.push(Item {
+                off: 0,
                 k: "result",
                 text: clip(&result_text(&b["content"]), DETAIL_MAX),
                 name: String::new(),
@@ -291,6 +340,7 @@ pub fn claude_items(v: &Value, out: &mut Vec<Item>) {
                 let name = b["name"].as_str().unwrap_or("tool").to_owned();
                 let (text, detail) = tool_summary(&name, &b["input"]);
                 out.push(Item {
+                    off: 0,
                     k: "tool",
                     text: clip(&text, 300),
                     name,
@@ -419,7 +469,7 @@ pub fn codex_items(v: &Value, out: &mut Vec<Item>) {
         return;
     }
     let p = &v["payload"];
-    let item = |k: &'static str, text: String| Item { k, text, name: String::new(), detail: String::new(), id: String::new(), err: false };
+    let item = |k: &'static str, text: String| Item { off: 0, k, text, name: String::new(), detail: String::new(), id: String::new(), err: false };
     match p["type"].as_str().unwrap_or_default() {
         "message" => {
             let text = codex_text(&p["content"]);
@@ -434,6 +484,7 @@ pub fn codex_items(v: &Value, out: &mut Vec<Item>) {
             let name = p["name"].as_str().unwrap_or("tool").to_owned();
             let raw = p["arguments"].as_str().or(p["input"].as_str()).unwrap_or_default();
             out.push(Item {
+                off: 0,
                 k: "tool",
                 text: clip(&codex_call_summary(raw), 300),
                 name,
@@ -448,6 +499,7 @@ pub fn codex_items(v: &Value, out: &mut Vec<Item>) {
                 return;
             }
             out.push(Item {
+                off: 0,
                 k: "result",
                 err: text.ends_with(']') && text.rsplit_once("\n[exit ").is_some(),
                 text: clip(&text, DETAIL_MAX),
@@ -542,20 +594,47 @@ mod tests {
         assert!(dir.ends_with("-Users-x-my-proj"));
         let a = dir.join("a.jsonl");
         fs::write(&a, "{\"type\":\"user\",\"message\":{\"content\":\"一\"}}\n{\"type\":\"user\",\"mess").unwrap();
-        let p1 = read_in(&home, "claude-code", cwd, None, None, None).unwrap();
+        let p1 = read_in(&home, "claude-code", cwd, None, None, None, None).unwrap();
         assert!(p1.reset && p1.items.len() == 1, "{p1:?}");
         fs::write(&a, "{\"type\":\"user\",\"message\":{\"content\":\"一\"}}\n{\"type\":\"user\",\"message\":{\"content\":\"二\"}}\n").unwrap();
-        let p2 = read_in(&home, "claude-code", cwd, None, Some(&p1.file), Some(p1.offset)).unwrap();
+        let p2 = read_in(&home, "claude-code", cwd, None, Some(&p1.file), Some(p1.offset), None).unwrap();
         assert!(!p2.reset && p2.items.len() == 1 && p2.items[0].text == "二", "{p2:?}");
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(dir.join("b.jsonl"), "{\"type\":\"user\",\"message\":{\"content\":\"新会话\"}}\n").unwrap();
-        let p3 = read_in(&home, "claude-code", cwd, None, Some(&p2.file), Some(p2.offset)).unwrap();
+        let p3 = read_in(&home, "claude-code", cwd, None, Some(&p2.file), Some(p2.offset), None).unwrap();
         assert!(p3.reset && p3.items[0].text == "新会话", "{p3:?}");
         // The process's own session wins over the newest file.
         fs::create_dir_all(home.join(".claude/sessions")).unwrap();
         fs::write(home.join(".claude/sessions/4242.json"), format!("{{\"pid\":4242,\"sessionId\":\"a\",\"cwd\":\"{cwd}\"}}")).unwrap();
-        let p4 = read_in(&home, "claude-code", "/elsewhere", Some(4242), Some(&p3.file), Some(p3.offset)).unwrap();
+        let p4 = read_in(&home, "claude-code", "/elsewhere", Some(4242), Some(&p3.file), Some(p3.offset), None).unwrap();
         assert!(p4.reset && p4.file.ends_with("/a.jsonl") && p4.items[0].text == "一", "{p4:?}");
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn earlier_parts_by_line() {
+        let home = std::env::temp_dir().join(format!("ddup-tr-old-{}", std::process::id()));
+        let cwd = "/p/q";
+        let dir = claude_dir(&home, cwd);
+        fs::create_dir_all(&dir).unwrap();
+        // Lines big enough that the first read leaves the beginning out.
+        let pad = "x".repeat(4000);
+        let mut log = String::new();
+        for i in 0..1000 {
+            log.push_str(&format!("{{\"type\":\"user\",\"message\":{{\"content\":\"m{i} {pad}\"}}}}\n"));
+        }
+        fs::write(dir.join("s.jsonl"), &log).unwrap();
+        let p1 = read_in(&home, "claude-code", cwd, None, None, None, None).unwrap();
+        assert!(p1.truncated && p1.start > 0 && p1.items.len() <= MAX_ITEMS);
+        assert!(p1.items.last().unwrap().text.starts_with("m999 "));
+        assert_eq!(p1.start, p1.items[0].off);
+        let first = p1.items[0].text.split(' ').next().unwrap().trim_start_matches('m').parse::<usize>().unwrap();
+        let p2 = read_in(&home, "claude-code", cwd, None, Some(&p1.file), Some(p1.offset), Some(p1.start)).unwrap();
+        assert!(p2.older && !p2.reset);
+        // Ends right before what was shown, no overlap, no gap.
+        let last = p2.items.last().unwrap().text.split(' ').next().unwrap().trim_start_matches('m').parse::<usize>().unwrap();
+        assert_eq!(last + 1, first);
+        assert!(p2.start < p1.start);
         let _ = fs::remove_dir_all(&home);
     }
 }

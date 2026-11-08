@@ -81,7 +81,8 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
 | ←桥 | `{"t":"push_result","re":"push_test"\|"push_token","ok":true,"detail":"…"}` | `re` 指明是哪条请求的结果 |
 | ←桥 | `{"t":"hc_closed","code":0}` | `hc connect` 退出了；App 应重连 |
 | App→ | `{"t":"transcript","id":1,"app":"claude-code","cwd":"…","pid":123,"file":"…","offset":0}` | 读 Agent 自己的会话记录（D32）。`file`/`offset` 是上次回复里的，第一次不带 |
-| ←桥 | `{"t":"transcript","id":1,"file":"…","offset":…,"reset":true,"truncated":true,"items":[{"k":"user"\|"assistant"\|"tool"\|"result","text":"…","name":"Bash","detail":"…","id":"…","err":false}]}` | `reset` 表示换了文件或第一次读，App 清空重来；`result` 用 `id` 对应它的 `tool`；出错时只有 `error` |
+| App→ | `{"t":"transcript",…,"file":"…","before":12345}` | 读 `before` 之前的一段（加载更早的内容），回复带 `"older":true` 和新的 `start` |
+| ←桥 | `{"t":"transcript","id":1,"file":"…","offset":…,"reset":true,"truncated":true,"start":…,"items":[{"k":"user"\|"assistant"\|"tool"\|"result","text":"…","name":"Bash","detail":"…","id":"…","err":false,"o":…}]}` | `reset` 表示换了文件或第一次读，App 清空重来；`result` 用 `id` 对应它的 `tool`；出错时只有 `error` |
 | App→ | `{"t":"ports","id":2}` | Mac 上在监听、能回 HTTP 的端口 |
 | ←桥 | `{"t":"ports","id":2,"sites":[{"port":5173,"process":"node","pid":…,"cwd":"…","title":"…","status":200}]}` | 去掉 cwd 为 `/` 的系统服务；有标题的排前面 |
 | App→ | `{"t":"forward","id":3,"port":5173}` | 为这个端口开转发 |

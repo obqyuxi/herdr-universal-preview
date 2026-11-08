@@ -27,6 +27,8 @@ class ChatRow {
   err: boolean = false;
   parts: Part[] = [];
   callId: string = '';
+  /// Byte offset of its log line (where to read earlier parts from).
+  off: number = 0;
   /// Local web addresses it mentions (opened in the web preview).
   urls: string[] = [];
 
@@ -43,6 +45,7 @@ class ChatRow {
     r.parts = this.parts;
     r.callId = this.callId;
     r.urls = this.urls;
+    r.off = this.off;
     return r;
   }
 }
@@ -56,7 +59,8 @@ const LABEL: Record<string, string> = {
 const FILE_TOOLS = ['Edit', 'MultiEdit', 'Write', 'Read', 'NotebookEdit'];
 const POLL_MS = 2000;
 const IDLE_POLL_MS = 5000;
-const MAX_ROWS = 300;
+/// Rows kept while following new output (loading earlier parts may go past it).
+const MAX_ROWS = 600;
 /// A run of tool calls longer than this folds; the last few stay in view.
 const FOLD_OVER = 3;
 const KEEP_LAST = 2;
@@ -104,6 +108,9 @@ export struct ChatView {
   @State error: string = '';
   @State loading: boolean = true;
   @State truncated: boolean = false;
+  @State loadingOlder: boolean = false;
+  /// Byte offset where what's shown begins (0: the session's start).
+  private earliest: number = 0;
   onOpenFile: (path: string) => void = (path: string) => {};
   private scroller: Scroller = new Scroller();
   private file: string = '';
@@ -154,7 +161,7 @@ export struct ChatView {
       return;
     }
     this.busy = true;
-    Session.shared.transcript(this.app, this.cwd, this.pid, this.file, this.readAt).then((m: ControlMsg) => {
+    Session.shared.transcript(this.app, this.cwd, this.pid, this.file, this.readAt, 0).then((m: ControlMsg) => {
       this.busy = false;
       this.loading = false;
       this.error = '';
@@ -176,7 +183,8 @@ export struct ChatView {
       this.byCall.clear();
       this.openKeys = [];
       this.openGroups = [];
-      this.truncated = m.truncated ?? false;
+      this.earliest = m.start ?? 0;
+      this.truncated = this.earliest > 0;
     }
     this.file = m.file ?? '';
     this.readAt = m.offset ?? 0;
@@ -188,12 +196,55 @@ export struct ChatView {
     }
     if (rows.length > MAX_ROWS) {
       rows = rows.slice(rows.length - MAX_ROWS);
+      // Start at a whole log line, so loading earlier parts doesn't repeat any.
+      const first = rows[0].off;
+      while (rows.length > 0 && rows[0].off === first) {
+        rows.shift();
+      }
+      this.earliest = first;
       this.truncated = true;
     }
     this.rows = rows;
     if (atEnd) {
       setTimeout((): void => this.scroller.scrollEdge(Edge.Bottom), 50);
     }
+  }
+
+  /// The part of the session before what's shown, put on top; the view stays where it was.
+  private loadOlder(): void {
+    if (this.loadingOlder || this.earliest <= 0 || !this.file) {
+      return;
+    }
+    this.loadingOlder = true;
+    const firstKey = this.rows.length > 0 ? this.rows[0].key : '';
+    Session.shared.transcript(this.app, this.cwd, this.pid, this.file, this.readAt, this.earliest).then((m: ControlMsg) => {
+      this.loadingOlder = false;
+      if (!m.older || m.file !== this.file) {
+        return;
+      }
+      const older: ChatRow[] = [];
+      for (const it of m.items ?? []) {
+        this.add(older, it);
+      }
+      for (let i = 0; i < older.length; i++) {
+        // Their results were in the part already left out: don't spin forever.
+        if (older[i].k === 'tool' && !older[i].done) {
+          const r = older[i].copy();
+          r.done = true;
+          older[i] = r;
+        }
+      }
+      this.earliest = m.start ?? 0;
+      this.truncated = this.earliest > 0;
+      this.rows = older.concat(this.rows);
+      const idx = this.view().findIndex((r: ChatRow) => r.key === firstKey);
+      if (idx >= 0) {
+        setTimeout((): void => this.scroller.scrollToIndex(idx + (this.truncated ? 1 : 0)), 50);
+      }
+    }).catch((e: Error) => {
+      this.loadingOlder = false;
+      this.error = e.message;
+    });
   }
 
   private add(rows: ChatRow[], it: ChatItem): void {
@@ -222,6 +273,7 @@ export struct ChatView {
     r.name = it.name ?? '';
     r.detail = it.detail ?? '';
     r.callId = it.id ?? '';
+    r.off = it.o ?? 0;
     if (it.k !== 'tool') {
       r.parts = splitParts(it.text);
       if (r.parts.length === 0) {
@@ -340,9 +392,15 @@ export struct ChatView {
       List({ scroller: this.scroller, space: 6 }) {
         if (this.truncated) {
           ListItem() {
-            Text('更早的内容没有加载，可以切到「终端」往上翻').fontSize(12).fontColor('#6B7075')
-              .width('100%').textAlign(TextAlign.Center).padding(8)
-          }
+            Row({ space: 8 }) {
+              if (this.loadingOlder) {
+                LoadingProgress().width(16).height(16).color('#9AA0A6')
+              }
+              Text(this.loadingOlder ? '正在加载…' : '加载更早的内容').fontSize(13).fontColor('#4C9AFF')
+            }
+            .padding({ left: 14, right: 14, top: 7, bottom: 7 }).borderRadius(16).backgroundColor('#1A2638')
+            .onClick(() => this.loadOlder())
+          }.width('100%').padding(6).align(Alignment.Center)
         }
         ForEach(this.view(), (r: ChatRow) => {
           ListItem() {

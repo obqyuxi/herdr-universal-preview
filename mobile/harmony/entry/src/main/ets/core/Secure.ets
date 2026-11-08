@@ -20,6 +20,8 @@ export interface ChatItem {
   detail?: string;
   id?: string;
   err?: boolean;
+  /// Byte offset of the log line it came from.
+  o?: number;
 }
 
 /// A local web server on the Mac (bridge/src/ports.rs).
@@ -44,6 +46,9 @@ export interface ControlMsg {
   offset?: number;
   reset?: boolean;
   truncated?: boolean;
+  start?: number;
+  older?: boolean;
+  before?: number;
   items?: ChatItem[];
   sites?: SiteInfo[];
   port?: number;

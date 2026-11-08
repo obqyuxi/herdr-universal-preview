@@ -6,6 +6,7 @@
 import { promptAction, router } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
 import { common, Want } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 import { Session } from '../core/Session';
 import { ControlMsg, SiteInfo } from '../core/Secure';
 
@@ -47,10 +48,20 @@ struct WebPreview {
   @State pageTitle: string = '';
   @State progress: number = 0;
   @State manual: string = '';
+  /// "port:9310" or "dir:<cwd>|<process>" (all of one program's servers in a folder).
+  @State hidden: string[] = [];
+  @State showHidden: boolean = false;
+  private prefs: preferences.Preferences | null = null;
   private params: WebParams = (router.getParams() as WebParams) ?? new WebParams();
   private controller: webview.WebviewController = new webview.WebviewController();
 
   aboutToAppear(): void {
+    try {
+      this.prefs = preferences.getPreferencesSync(getContext(this), { name: 'web-preview' });
+      this.hidden = this.prefs.getSync('hidden', []) as string[];
+    } catch (e) {
+      this.prefs = null;
+    }
     if (this.params.port > 0) {
       const s: SiteInfo = { port: this.params.port, process: '', pid: 0, status: 0 };
       this.openSite(s, this.params.path);
@@ -100,6 +111,40 @@ struct WebPreview {
     });
   }
 
+  private isHidden(s: SiteInfo): boolean {
+    return this.hidden.includes(`port:${s.port}`) || this.hidden.includes(`dir:${s.cwd ?? ''}|${s.process}`);
+  }
+
+  private setHidden(list: string[]): void {
+    this.hidden = list;
+    if (this.prefs !== null) {
+      this.prefs.putSync('hidden', list);
+      this.prefs.flush().catch((): void => {});
+    }
+  }
+
+  private siteMenu(s: SiteInfo): void {
+    if (this.isHidden(s)) {
+      promptAction.showActionMenu({ title: `localhost:${s.port}`, buttons: [{ text: '取消隐藏', color: '#4C9AFF' }] })
+        .then(() => {
+          this.setHidden(this.hidden.filter((k: string) => k !== `port:${s.port}` && k !== `dir:${s.cwd ?? ''}|${s.process}`));
+        }).catch((): void => {});
+      return;
+    }
+    const same = this.sites.filter((x: SiteInfo) => x.process === s.process && (x.cwd ?? '') === (s.cwd ?? '')).length;
+    const one: promptAction.Button = { text: `隐藏端口 ${s.port}`, color: '#4C9AFF' };
+    const all: promptAction.Button = { text: `隐藏 ${baseName(s.cwd ?? '')} 里的 ${same} 个 ${s.process} 服务`, color: '#4C9AFF' };
+    const title = s.title ? s.title : `localhost:${s.port}`;
+    const menu = s.cwd && same > 1 ? promptAction.showActionMenu({ title: title, buttons: [one, all] })
+      : promptAction.showActionMenu({ title: title, buttons: [one] });
+    menu
+      .then((r: promptAction.ActionMenuSuccessResponse) => {
+        const key = r.index === 0 ? `port:${s.port}` : `dir:${s.cwd ?? ''}|${s.process}`;
+        this.setHidden(this.hidden.concat([key]));
+        promptAction.showToast({ message: '已隐藏，可在列表底部"显示"找回' });
+      }).catch((): void => {});
+  }
+
   private openManual(): void {
     const port = Number.parseInt(this.manual.trim());
     if (!(port > 0 && port < 65536)) {
@@ -130,7 +175,9 @@ struct WebPreview {
       Text('›').fontSize(20).fontColor('#6B7075')
     }
     .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .opacity(this.isHidden(s) ? 0.45 : 1)
     .onClick(() => this.openSite(s, '/'))
+    .gesture(LongPressGesture().onAction(() => this.siteMenu(s)))
   }
 
   build() {
@@ -145,7 +192,7 @@ struct WebPreview {
         Column() {
           Text(this.open !== null ? this.pageTitle : '预览网页').fontSize(16).fontColor('#E6E6E6')
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(this.open !== null ? `Mac 上的 localhost:${this.open.port}` : 'Mac 上正在运行的网页服务').fontSize(11).fontColor('#8A8F98')
+          Text(this.open !== null ? `Mac 上的 localhost:${this.open.port}` : 'Mac 上正在运行的网页服务 · 长按可隐藏').fontSize(11).fontColor('#8A8F98')
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
         if (this.open !== null) {
           Button('刷新').fontSize(12).height(28).padding({ left: 10, right: 10 })
@@ -185,16 +232,25 @@ struct WebPreview {
         }
       } else {
         List() {
-          ForEach(this.sites, (s: SiteInfo) => {
+          ForEach(this.sites.filter((s: SiteInfo) => this.showHidden || !this.isHidden(s)), (s: SiteInfo) => {
             ListItem() {
               this.siteRow(s)
             }
-          }, (s: SiteInfo) => `${s.port}|${s.title}`)
+          }, (s: SiteInfo) => `${s.port}|${s.title}|${this.isHidden(s)}`)
+          if (this.sites.some((s: SiteInfo) => this.isHidden(s))) {
+            ListItem() {
+              Text(this.showHidden ? '收起已隐藏的' : `已隐藏 ${this.sites.filter((s: SiteInfo) => this.isHidden(s)).length} 个 · 显示`)
+                .fontSize(13).fontColor('#4C9AFF').width('100%').textAlign(TextAlign.Center).padding(14)
+                .onClick(() => {
+                  this.showHidden = !this.showHidden;
+                })
+            }
+          }
         }.layoutWeight(1).divider({ strokeWidth: 0.5, color: '#22262B', startMargin: 16 })
 
         if (this.loading) {
           LoadingProgress().width(32).height(32).color('#9AA0A6').margin({ bottom: 24 })
-        } else if (this.error || this.sites.length === 0) {
+        } else if (this.error || this.sites.filter((s: SiteInfo) => !this.isHidden(s)).length === 0 && !this.showHidden) {
           Text(this.error ? this.error : '没有发现网页服务。让 Agent 启动开发服务器（例如 npm run dev），再点刷新。')
             .fontSize(13).fontColor('#9AA0A6').textAlign(TextAlign.Center).padding({ left: 24, right: 24, bottom: 16 })
         }

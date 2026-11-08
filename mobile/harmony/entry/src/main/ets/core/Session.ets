@@ -529,11 +529,15 @@ export class Session {
     });
   }
 
-  transcript(app: string, cwd: string, pid: number, file: string, offset: number): Promise<ControlMsg> {
+  /// `before` > 0 asks for the part of the log before that byte (older messages).
+  transcript(app: string, cwd: string, pid: number, file: string, offset: number, before: number): Promise<ControlMsg> {
     const m: ControlMsg = { t: 'transcript', app: app, cwd: cwd, pid: pid };
     if (file) {
       m.file = file;
       m.offset = offset;
+    }
+    if (before > 0) {
+      m.before = before;
     }
     return this.request(m, 15000);
   }

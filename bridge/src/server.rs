@@ -420,7 +420,8 @@ async fn on_control(ctx: &Arc<Ctx>, conn: u64, device: &str, v: &Value) -> Optio
             let (app, cwd) = (v["app"].as_str().unwrap_or_default().to_owned(), v["cwd"].as_str().unwrap_or_default().to_owned());
             let (file, offset) = (v["file"].as_str().map(str::to_owned), v["offset"].as_u64());
             let pid = v["pid"].as_u64().and_then(|p| u32::try_from(p).ok()).filter(|p| *p > 0);
-            let r = tokio::task::spawn_blocking(move || crate::transcript::read(&app, &cwd, pid, file.as_deref(), offset)).await;
+            let before = v["before"].as_u64();
+            let r = tokio::task::spawn_blocking(move || crate::transcript::read(&app, &cwd, pid, file.as_deref(), offset, before)).await;
             Some(match r.map_err(|e| anyhow!(e)).and_then(|r| r) {
                 Ok(page) => {
                     let mut j = serde_json::to_value(page).unwrap_or_default();

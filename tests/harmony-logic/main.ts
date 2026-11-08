@@ -87,7 +87,7 @@ check('foreground process and folder tracked', await until('fg', () => (s.agents
 const sites = await s.sites();
 check('ports request answered', Array.isArray(sites.sites), JSON.stringify(sites));
 let trErr = '';
-await s.transcript('claude-code', '/nonexistent-ddup', 0, '', 0).catch((e: Error) => { trErr = e.message; });
+await s.transcript('claude-code', '/nonexistent-ddup', 0, '', 0, 0).catch((e: Error) => { trErr = e.message; });
 check('transcript for a folder without sessions says so', trErr.includes('没找到'), trErr);
 
 // Files beside a terminal, commands, reading files.
