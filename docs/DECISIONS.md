@@ -228,3 +228,9 @@
 - 用户要求：在 Agent 输出的文件路径上点右键，可以打开访达。
 - 宿主补丁 0007：右键时，如果鼠标下是本机上存在的文件或文件夹链接（判断方式和 D23 相同，`file://` URL 也算），就把路径作为 `target.link` 传给 pane 菜单。菜单最上面多一项 "Reveal in Finder"，下面加一条分隔线，执行的是 `native.reveal {path}`，也就是 `open -R`，在 Finder 里选中该文件。不在链接上右键时，菜单和以前一样。
 - 菜单改的是内置的 `defaults/mods/menu`。用户 `~/.config/herdr-app/mods/menu` 那一份没改过，`sync_defaults` 会随新版本更新它。官方 Herdr 不传 `link`，所以这一项不会出现在官方 Herdr 里。
+
+## D26 TUI 按词折行的长路径也能点击（2026-11-05）
+
+- 用户实测：omp 输出的 `/Users/me/Documents/github/some-project/outputs/月度报表_销售汇总_2026-11.xlsx`，Cmd+点击和右键都没反应。
+- 原因：omp 的 `wrapTextWithAnsi` 按词折行（已用它本身复现），把 `_2026-11.xlsx` 整体挪到下一行，上一行离右边缘最多空出一个词的宽度。上游只拼接写到离右边缘 4 格以内的行，所以只识别出不存在的半截路径。这和 Agent 种类无关，Claude Code 只是碰巧把行写满了。
+- 宿主补丁 0008：上一行离右边缘的空白，小于"下一行第一个词的宽度 + 4"时也拼接。这正是按词折行的条件：词放不下才换行。拼接后的路径仍须在本机存在才算链接，所以短行和普通文字不会被误拼。单元测试 `a_word_that_did_not_fit_joins_the_row_above` 覆盖了这个情况（旧规则下会失败）。

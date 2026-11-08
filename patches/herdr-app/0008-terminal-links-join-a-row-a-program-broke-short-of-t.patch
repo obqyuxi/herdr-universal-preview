@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: herdr-universal-preview <hup@localhost>
+Date: Thu, 5 Nov 2026 18:43:12 -0800
+Subject: [PATCH 8/8] terminal links: join a row a program broke short of the
+ edge when the next row's first word didn't fit
+
+omp wraps by words and puts `_2026-11.xlsx` below a path ending in CJK,
+leaving the row up to a word short of the edge; only rows within 4 cells
+of the edge joined, so the path was neither Cmd-clickable nor offered
+Reveal in Finder. A join still needs the whole path to exist.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+diff --git a/src/vt.rs b/src/vt.rs
+index 26a2a79..c2c3011 100644
+--- a/src/vt.rs
++++ b/src/vt.rs
+@@ -528,12 +528,19 @@ fn link_text(rows: &[Row]) -> (String, Vec<Spot>) {
+ }
+ 
+ impl Row {
+-    /// Whether the row runs on into the next: the terminal wrapped it, or it
+-    /// reaches the right edge, where a program breaks a line too long to fit.
+-    fn full(&self, cols: u16) -> bool {
++    fn blank(&self, s: &Spot) -> bool {
++        self.text[s.byte..].starts_with(' ')
++    }
++
++    /// Whether the row runs on into `next`: the terminal wrapped it, or it
++    /// stops where a program breaking lines to fit leaves it, at the right
++    /// edge or short of it by less than `next`'s first word, which didn't fit
++    /// (omp breaks a path between `管家` and `_2026-11.xlsx`).
++    fn runs_into(&self, next: &Row, cols: u16) -> bool {
+         // Cells a program may leave blank at the edge of its own width.
+         const EDGE: u16 = 4;
+-        self.wraps || self.spots.iter().rev().find(|s| !self.text[s.byte..].starts_with(' ')).is_some_and(|s| s.x + s.width + EDGE >= cols)
++        let word: u16 = next.spots.iter().skip_while(|s| next.blank(s)).take_while(|s| !next.blank(s)).map(|s| s.width).sum();
++        self.wraps || self.spots.iter().rev().find(|s| !self.blank(s)).is_some_and(|s| s.x + s.width + EDGE + word >= cols)
+     }
+ }
+ 
+@@ -1040,24 +1047,24 @@ impl Vt {
+         // the right edge, and only where the hovered word runs into one.
+         const BROKEN: u32 = 4;
+         let word = word_range(&text, spots[at].byte);
+-        let mut above = Vec::new();
++        let mut above: Vec<Row> = Vec::new();
+         if text[..word.start].trim().is_empty() {
+             for y in (first.saturating_sub(BROKEN)..first).rev() {
+-                match self.link_row(y) {
+-                    Some(row) if row.full(self.cols) => above.push(row),
+-                    _ => break,
++                let Some(row) = self.link_row(y) else { break };
++                if !row.runs_into(above.last().unwrap_or(&rows[0]), self.cols) {
++                    break;
+                 }
++                above.push(row);
+             }
+         }
+-        let mut below = Vec::new();
+-        if text[word.end..].trim().is_empty() && rows.last().is_some_and(|row| row.full(self.cols)) {
++        let mut below: Vec<Row> = Vec::new();
++        if text[word.end..].trim().is_empty() {
+             for y in last + 1..=last + BROKEN {
+                 let Some(row) = self.link_row(y) else { break };
+-                let full = row.full(self.cols);
+-                below.push(row);
+-                if !full {
++                if !below.last().or(rows.last()).is_some_and(|prev| prev.runs_into(&row, self.cols)) {
+                     break;
+                 }
++                below.push(row);
+             }
+         }
+         let (group, up_most, down_most) = (rows.len(), above.len(), below.len());
+@@ -2084,6 +2091,24 @@ mod tests {
+         assert_eq!(vt.link_at(6, 0, exists).unwrap().target, "/tmp/ab");
+     }
+ 
++    #[test]
++    fn a_word_that_did_not_fit_joins_the_row_above() {
++        let path = "/Users/me/outputs/月度报表_销售汇总_2026-11.xlsx";
++        let exists = |text: &str, at: usize, _| {
++            let range = crate::links::find(text, at)?;
++            [path, "/tmp/ab/cd"].contains(&&text[range.clone()]).then_some(range)
++        };
++        // omp wraps by words: `_2026-11.xlsx` goes below, 8 cells short of the edge.
++        let mut vt = Vt::new(52, 4);
++        vt.write(" 已导出：/Users/me/outputs/月度报表_销售汇总\r\n _2026-11.xlsx".as_bytes());
++        assert_eq!(vt.link_at(20, 0, exists).unwrap().target, path);
++        assert_eq!(vt.link_at(5, 1, exists).unwrap().target, path);
++        // Short of the edge by more than the next word: that word would have fit.
++        let mut vt = Vt::new(20, 4);
++        vt.write(b"see /tmp/ab\r\n/cd x");
++        assert_eq!(vt.link_at(6, 0, exists), None);
++    }
++
+     #[test]
+     fn joined_lines_tell_find() {
+         let mut vt = Vt::new(26, 4);

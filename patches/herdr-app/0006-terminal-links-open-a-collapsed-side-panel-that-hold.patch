@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Wed, 4 Nov 2026 02:39:44 -0800
-Subject: [PATCH 6/7] terminal links: open a collapsed side panel that holds
+Subject: [PATCH 6/8] terminal links: open a collapsed side panel that holds
  files-plus
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

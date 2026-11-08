@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Thu, 5 Nov 2026 02:03:18 -0800
-Subject: [PATCH 7/7] terminal links: right-click a file or folder link for
+Subject: [PATCH 7/8] terminal links: right-click a file or folder link for
  Reveal in Finder
 
 The pane menu gets the local path under the pointer and offers
