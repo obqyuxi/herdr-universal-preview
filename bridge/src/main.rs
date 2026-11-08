@@ -1,4 +1,4 @@
-//! ddup-bridge: lets the DD-up HarmonyOS app reach herdr-core on this Mac (D27).
+//! ddup-bridge: lets the HarmonyOS app (码上) reach herdr-core on this Mac (D27).
 //! Design and wire protocol: docs/harmony/DESIGN.md.
 
 mod crypto;
@@ -25,7 +25,7 @@ use tokio_tungstenite::tungstenite::Message;
 #[command(
     name = "ddup-bridge",
     version,
-    about = "Let the DD-up HarmonyOS app reach herdr-core on this Mac (encrypted relay of `hc connect`, QR pairing, Push Kit alerts)"
+    about = "Let the HarmonyOS app (码上) reach herdr-core on this Mac (encrypted relay of `hc connect`, QR pairing, Push Kit alerts)"
 )]
 struct Cli {
     /// State directory (default: $DDUP_BRIDGE_HOME or ~/Library/Application Support/DD-up/bridge)
@@ -153,7 +153,8 @@ fn main() -> Result<()> {
         }
         Cmd::PushTest { token } => {
             let ctx = server::Ctx::new(store)?;
-            let alert = watch::Alert { terminal: "test".into(), why: watch::Why::Done, title: "DD-up 测试通知".into(), body: "推送通道正常".into() };
+            let alert =
+                watch::Alert { terminal: "test".into(), why: watch::Why::Done, title: "码上 · 测试通知".into(), body: "推送通道正常".into() };
             let sent = match token {
                 Some(t) => ctx.push_to(&[t], &alert)?,
                 None => ctx.push(&alert)?,
@@ -268,7 +269,7 @@ fn pair(store: &Store, hosts: Vec<String>, link_only: bool, json_out: bool) -> R
             .quiet_zone(true)
             .build();
         println!("{art}");
-        println!("Scan with DD-up on the phone (valid 10 minutes, once). Addresses: {}", hosts.join(", "));
+        println!("Scan with 码上 on the phone (valid 10 minutes, once). Addresses: {}", hosts.join(", "));
     }
     println!("{link}");
     Ok(())

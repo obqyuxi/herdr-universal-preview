@@ -269,7 +269,7 @@ fn decide(h: &Head, port: u16, lp: u16, token: &str) -> Decision {
         }
     }
     if !ok {
-        let body = "这个预览链接已失效，请在 DD-up 里重新打开。";
+        let body = "这个预览链接已失效，请在手机上的「码上」里重新打开。";
         return Decision::Reply(format!(
             "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()

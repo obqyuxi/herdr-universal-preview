@@ -129,7 +129,7 @@ export default class PhonePair extends View {
           ? div().py(40).text_size(13).text_color(t.muted).child("正在生成二维码…")
           : v_flex().items_center().gap(12).pt(6)
             .child(expired ? div().py(60).text_size(13).text_color(t.muted).child("二维码已过期") : this.qr(d.qr))
-            .child(div().text_size(12.5).text_color(t.muted).child("打开手机上的 DD-up，点「扫码配对」"))
+            .child(div().text_size(12.5).text_color(t.muted).child("打开手机上的「码上」，点「扫码配对」"))
             .when(!d.serving, (el) => el.child(div().text_size(12).text_color(t.blocked)
               .child("桥接服务没在运行，手机连不上：运行 scripts/bridge-service install")))
             .child(div().text_size(11.5).text_color(t.dim)

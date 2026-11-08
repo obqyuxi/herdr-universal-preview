@@ -203,7 +203,7 @@ struct Index {
   @Builder
   pairView() {
     Column({ space: 16 }) {
-      Text('DD-up').fontSize(34).fontWeight(FontWeight.Bold).fontColor('#E6E6E6')
+      Text('码上').fontSize(34).fontWeight(FontWeight.Bold).fontColor('#E6E6E6')
       Text('在 Mac 的 DD-up 里点 Settings 旁边的手机图标，扫描弹出的二维码').fontSize(15).fontColor('#9AA0A6').textAlign(TextAlign.Center)
         .padding({ left: 32, right: 32 })
       Button(this.busy ? '连接中…' : '扫码配对')

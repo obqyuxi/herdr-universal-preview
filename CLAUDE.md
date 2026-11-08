@@ -33,6 +33,6 @@
 - `mods/`：本项目的 Mods。
 - `layouts/`：布局。
 - `bridge/`：`ddup-bridge`，让鸿蒙 App 连到 Mac 上的 core（D27）。
-- `mobile/harmony/`：鸿蒙版 DD-up（ArkTS）。设计与安装说明：`docs/harmony/`。
+- `mobile/harmony/`：鸿蒙版 DD-up，手机上显示名为“码上”（ArkTS，D33）。设计与安装说明：`docs/harmony/`。
 - `tests/`：测试。
 - `.local/`、`.work/`、`artifacts/`：均被忽略，不进 Git。

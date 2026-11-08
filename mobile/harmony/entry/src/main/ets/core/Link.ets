@@ -22,7 +22,7 @@ export function parsePairLink(text: string): PairLink {
   const s = text.trim();
   const prefix = 'ddup://pair?';
   if (!s.startsWith(prefix)) {
-    throw new Error('不是 DD-up 配对链接（应以 ddup://pair? 开头）');
+    throw new Error('不是配对链接（应以 ddup://pair? 开头）');
   }
   const link = new PairLink();
   for (const kv of s.substring(prefix.length).split('&')) {

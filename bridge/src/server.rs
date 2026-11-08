@@ -405,7 +405,7 @@ async fn on_control(ctx: &Arc<Ctx>, conn: u64, device: &str, v: &Value) -> Optio
                     .and_then(|d| d.push_token)
                     .ok_or_else(|| anyhow!("this device has not registered a push token"))?;
                 let alert =
-                    Alert { terminal: "test".into(), why: crate::watch::Why::Done, title: "DD-up 测试通知".into(), body: "推送通道正常".into() };
+                    Alert { terminal: "test".into(), why: crate::watch::Why::Done, title: "码上 · 测试通知".into(), body: "推送通道正常".into() };
                 ctx.push_to(&[token], &alert)
             })
             .await
