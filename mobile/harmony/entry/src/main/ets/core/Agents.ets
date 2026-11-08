@@ -14,7 +14,15 @@ export interface StatusRec {
   progress?: number | null;
 }
 
+/// What runs in front in a terminal (the agent, not the shell that started it).
+export interface FgRec {
+  pid?: number | null;
+  name?: string;
+  cwd?: string | null;
+}
+
 export interface TermRec {
+  foreground?: FgRec | null;
   address?: string;
   name?: string | null;
   title?: string;
@@ -33,6 +41,8 @@ export interface TermRec {
 
 /// `data` of the events that patch one field (status, turn, title, labels, size).
 export interface PatchData {
+  pid?: number | null;
+  cwd?: string | null;
   status?: StatusRec | null;
   status_ms?: number | null;
   turn?: number;
@@ -77,6 +87,9 @@ export class Agent {
   name: string = '';
   title: string = '';
   cwd: string = '';
+  /// The foreground process and its folder (where an agent really works).
+  fgPid: number = 0;
+  fgCwd: string = '';
   live: boolean = true;
   state: string = '';
   app: string = '';
@@ -101,6 +114,8 @@ export class Agent {
     a.name = r.name ?? '';
     a.title = r.title ?? '';
     a.cwd = r.cwd ?? '';
+    a.fgPid = r.foreground?.pid ?? 0;
+    a.fgCwd = r.foreground?.cwd ?? '';
     a.live = (r.state ?? 'live') === 'live';
     a.turn = r.turn ?? 0;
     a.cols = r.cols ?? 80;
@@ -161,8 +176,13 @@ export class Agent {
     return base ? base : this.address;
   }
 
+  /// Where it works: the foreground process's folder, else the shell's.
+  dir(): string {
+    return this.fgCwd ? this.fgCwd : this.cwd;
+  }
+
   folder(): string {
-    const parts = this.cwd.split('/').filter((s: string) => s.length > 0);
+    const parts = this.dir().split('/').filter((s: string) => s.length > 0);
     return parts.length > 0 ? parts[parts.length - 1] : '';
   }
 
@@ -190,7 +210,7 @@ export class Agent {
       return (this.msg ? this.msg : '工作中') + p;
     }
     if (this.state === '') {
-      return this.title ? this.title : this.cwd;
+      return this.title ? this.title : this.dir();
     }
     return this.msg ? this.msg : this.state;
   }
@@ -259,6 +279,9 @@ export class AgentStore {
       a.title = d.title ?? a.title;
     } else if (kind === 'labels') {
       a.setLabels(d.labels ?? d.record?.labels);
+    } else if (kind === 'foreground') {
+      a.fgPid = d.pid ?? 0;
+      a.fgCwd = d.cwd ?? '';
     } else if (kind === 'size') {
       a.cols = d.cols ?? a.cols;
       a.rows = d.rows ?? a.rows;

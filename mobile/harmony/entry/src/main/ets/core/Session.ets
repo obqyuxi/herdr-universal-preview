@@ -212,6 +212,11 @@ export class Session {
   private foreground: boolean = true;
   private pushToken: string = '';
   private pushWaiter: ((m: ControlMsg) => void) | null = null;
+  /// Requests waiting for their reply, by id.
+  private waiters: Map<number, (m: ControlMsg) => void> = new Map<number, (m: ControlMsg) => void>();
+  private nextId: number = 1;
+  /// The address that answered (for web previews, which connect to it directly).
+  host: string = '';
   private retryTimer: number = -1;
   private retryDelay: number = 2000;
   /// One dial at a time (foreground, retry timer and the page can all ask at once).
@@ -325,6 +330,7 @@ export class Session {
           }
           won = true;
           this.sock = sock;
+          this.host = host;
           const m = this.machine;
           if (m !== null && m.hosts[0] !== host) {
             // Try the address that worked first next time.
@@ -392,7 +398,11 @@ export class Session {
   }
 
   private onControl(m: ControlMsg): void {
-    if (m.t === 'push_result' && m.re === 'push_test' && this.pushWaiter !== null) {
+    const w = m.id !== undefined ? this.waiters.get(m.id) : undefined;
+    if (w !== undefined && m.id !== undefined) {
+      this.waiters.delete(m.id);
+      w(m);
+    } else if (m.t === 'push_result' && m.re === 'push_test' && this.pushWaiter !== null) {
       const w = this.pushWaiter;
       this.pushWaiter = null;
       w(m);
@@ -410,6 +420,11 @@ export class Session {
   }
 
   private drop(): void {
+    const waiting = Array.from(this.waiters.values());
+    this.waiters.clear();
+    for (const w of waiting) {
+      w({ t: 'dropped', error: '连接已断开' });
+    }
     const hc = this.hc;
     this.hc = null;
     if (hc !== null) {
@@ -487,6 +502,52 @@ export class Session {
       };
       sock.sendControl({ t: 'push_test' });
     });
+  }
+
+  /// Ask the bridge itself (not the core); the reply carries the same id.
+  request(m: ControlMsg, timeoutMs: number): Promise<ControlMsg> {
+    const sock = this.sock;
+    if (sock === null || this.conn !== Conn.Ready) {
+      return Promise.reject(new Error('未连接'));
+    }
+    const id = this.nextId++;
+    m.id = id;
+    return new Promise<ControlMsg>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiters.delete(id);
+        reject(new Error('桥接服务没有回应（需要更新 Mac 上的 ddup-bridge？）'));
+      }, timeoutMs);
+      this.waiters.set(id, (r: ControlMsg) => {
+        clearTimeout(timer);
+        if (r.error) {
+          reject(new Error(r.error));
+        } else {
+          resolve(r);
+        }
+      });
+      sock.sendControl(m);
+    });
+  }
+
+  transcript(app: string, cwd: string, pid: number, file: string, offset: number): Promise<ControlMsg> {
+    const m: ControlMsg = { t: 'transcript', app: app, cwd: cwd, pid: pid };
+    if (file) {
+      m.file = file;
+      m.offset = offset;
+    }
+    return this.request(m, 15000);
+  }
+
+  sites(): Promise<ControlMsg> {
+    return this.request({ t: 'ports' }, 15000);
+  }
+
+  /// A one-time link to a local web server, through a forward on the bridge.
+  async forward(port: number, path: string): Promise<string> {
+    const r = await this.request({ t: 'forward', port: port }, 15000);
+    const h = this.host.includes(':') ? `[${this.host}]` : this.host;
+    const p = path.startsWith('/') ? path : '/';
+    return `http://${h}:${r.listen_port}${p}${p.includes('?') ? '&' : '?'}__ddup=${r.token}`;
   }
 
   async forget(): Promise<void> {
@@ -646,8 +707,8 @@ export class Session {
     const seen: string[] = [];
     const list = this.agents.list().slice().sort((x: Agent, y: Agent) => y.statusMs - x.statusMs);
     for (const a of list) {
-      if (a.cwd && !seen.includes(a.cwd)) {
-        seen.push(a.cwd);
+      if (a.dir() && !seen.includes(a.dir())) {
+        seen.push(a.dir());
       }
     }
     return seen;

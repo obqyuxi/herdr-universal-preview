@@ -2,9 +2,11 @@
 //! Design and wire protocol: docs/harmony/DESIGN.md.
 
 mod crypto;
+mod ports;
 mod push;
 mod server;
 mod state;
+mod transcript;
 mod watch;
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -91,6 +93,9 @@ enum Cmd {
         /// Register this push token for the probe device
         #[arg(long)]
         push_token: Option<String>,
+        /// Send this control message (JSON with an "id") instead of calling the core; print the reply
+        #[arg(long)]
+        control: Option<String>,
     },
 }
 
@@ -178,7 +183,7 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
-        Cmd::Probe { link, creds, method, push_token } => tokio::runtime::Runtime::new()?.block_on(probe(link, creds, method, push_token)),
+        Cmd::Probe { link, creds, method, push_token, control } => tokio::runtime::Runtime::new()?.block_on(probe(link, creds, method, push_token, control)),
     }
 }
 
@@ -320,7 +325,7 @@ fn frame(channel: u32, kind: u8, payload: &[u8]) -> Vec<u8> {
     f
 }
 
-async fn probe(link: Option<String>, creds_path: PathBuf, method: String, push_token: Option<String>) -> Result<()> {
+async fn probe(link: Option<String>, creds_path: PathBuf, method: String, push_token: Option<String>, control: Option<String>) -> Result<()> {
     let saved: Option<Value> = std::fs::read(&creds_path).ok().and_then(|b| serde_json::from_slice(&b).ok());
     let (hosts, port, key, code) = match (&link, &saved) {
         (Some(l), _) => {
@@ -337,7 +342,7 @@ async fn probe(link: Option<String>, creds_path: PathBuf, method: String, push_t
     for host in &hosts {
         let url = format!("ws://{}:{port}/v1", if host.contains(':') { format!("[{host}]") } else { host.clone() });
         match tokio::time::timeout(std::time::Duration::from_secs(3), tokio_tungstenite::connect_async(&url)).await {
-            Ok(Ok((ws, _))) => return probe_on(ws, host, port, key, code, saved, &creds_path, &method, push_token).await,
+            Ok(Ok((ws, _))) => return probe_on(ws, host, port, key, code, saved, &creds_path, &method, push_token, control.clone()).await,
             Ok(Err(e)) => last = anyhow!("{url}: {e}"),
             Err(_) => last = anyhow!("{url}: timed out"),
         }
@@ -356,6 +361,7 @@ async fn probe_on(
     creds_path: &PathBuf,
     method: &str,
     push_token: Option<String>,
+    control: Option<String>,
 ) -> Result<()> {
     let (mut sink, mut source) = ws.split();
     let (ce, msg1) = crypto::client_start();
@@ -387,6 +393,22 @@ async fn probe_on(
     }
     if let Some(t) = push_token {
         sink.send(send_ctl(&mut keys, json!({"t": "push_token", "token": t}))).await?;
+    }
+    if let Some(c) = control {
+        let req: Value = serde_json::from_str(&c).context("--control is not JSON")?;
+        sink.send(send_ctl(&mut keys, req.clone())).await?;
+        loop {
+            let plain = keys.recv.open_record(&next_rec(&mut source, &mut records).await?)?;
+            if plain[0] != server::CONTROL {
+                continue;
+            }
+            let v: Value = serde_json::from_slice(&plain[1..])?;
+            if v["t"] == req["t"] && v["id"] == req["id"] {
+                println!("{}", serde_json::to_string_pretty(&v)?);
+                let _ = sink.close().await;
+                return if v.get("error").is_some() { Err(anyhow!("bridge error")) } else { Ok(()) };
+            }
+        }
     }
 
     let send_hc = |keys: &mut crypto::Keys, bytes: &[u8]| {

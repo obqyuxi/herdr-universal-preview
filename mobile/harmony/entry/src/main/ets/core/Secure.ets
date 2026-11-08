@@ -11,8 +11,43 @@ export const HC: number = 0x00;
 export const CONTROL: number = 0x01;
 
 /// Every control message, both directions (fields used depend on `t`).
+/// One entry of an agent's session log, as the bridge summarises it (bridge/src/transcript.rs).
+export interface ChatItem {
+  /// user | assistant | tool | result
+  k: string;
+  text: string;
+  name?: string;
+  detail?: string;
+  id?: string;
+  err?: boolean;
+}
+
+/// A local web server on the Mac (bridge/src/ports.rs).
+export interface SiteInfo {
+  port: number;
+  process: string;
+  pid: number;
+  cwd?: string;
+  title?: string;
+  status: number;
+}
+
 export interface ControlMsg {
   t: string;
+  /// Matches a request to its reply (transcript, ports, forward).
+  id?: number;
+  error?: string;
+  app?: string;
+  cwd?: string;
+  pid?: number;
+  file?: string;
+  offset?: number;
+  reset?: boolean;
+  truncated?: boolean;
+  items?: ChatItem[];
+  sites?: SiteInfo[];
+  port?: number;
+  listen_port?: number;
   code?: string;
   msg?: string;
   device?: string;

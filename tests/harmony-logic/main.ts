@@ -79,6 +79,17 @@ const seenBlocked = await until('blocked', () => s.agents.get(agentT)?.group() =
 check('a blocked agent shows under needs you', seenBlocked);
 check('its question is read off the screen', await until('prompt', () => (s.agents.get(agentT)?.prompt?.options.length ?? 0) === 2), JSON.stringify(s.agents.get(agentT)?.prompt));
 
+// The agent's own process (where its session log is found).
+check('foreground process and folder tracked', await until('fg', () => (s.agents.get(agentT)?.fgPid ?? 0) > 0 && (s.agents.get(agentT)?.dir() ?? '') !== ''),
+  `${s.agents.get(agentT)?.fgPid} ${s.agents.get(agentT)?.dir()}`);
+
+// Requests to the bridge itself, answered by id (chat view, web preview).
+const sites = await s.sites();
+check('ports request answered', Array.isArray(sites.sites), JSON.stringify(sites));
+let trErr = '';
+await s.transcript('claude-code', '/nonexistent-ddup', 0, '', 0).catch((e: Error) => { trErr = e.message; });
+check('transcript for a folder without sessions says so', trErr.includes('没找到'), trErr);
+
 // Files beside a terminal, commands, reading files.
 const put = await s.put(agentT, 'note.txt', utf8('附件内容'));
 check('put lands a file beside the terminal', put.endsWith('note.txt'), put);

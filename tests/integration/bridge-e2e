@@ -20,9 +20,23 @@ port=17841
 log=$HUP_LOGS/bridge-e2e.log
 python3 -I -c 'import json,sys; json.dump({"listen": "127.0.0.1:"+sys.argv[2], "hc": sys.argv[3], "session": sys.argv[4]}, open(sys.argv[1], "w"))' \
   "$state/config.json" "$port" "$HUP_HC" "$HUP_SESSION"
-"$bin" --state-dir "$state" serve >"$log" 2>&1 &
+# A Claude Code session log for the chat view, under a home of its own.
+proj=/tmp/ddup-e2e-proj
+mkdir -p "$state/home/.claude/projects/-tmp-ddup-e2e-proj"
+cat >"$state/home/.claude/projects/-tmp-ddup-e2e-proj/s1.jsonl" <<'JSONL'
+{"type":"user","cwd":"/tmp/ddup-e2e-proj","message":{"role":"user","content":"列出文件"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"只有 a.txt"}]}}
+JSONL
+# A local web server for the preview.
+mkdir -p "$state/site"; echo '<title>E2E Site</title>hello' >"$state/site/index.html"
+web_port=$(python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+python3 -I -m http.server "$web_port" --bind 127.0.0.1 --directory "$state/site" >/dev/null 2>&1 &
+web=$!
+HOME=$state/home "$bin" --state-dir "$state" serve >"$log" 2>&1 &
 pid=$!
-trap 'kill "$pid" 2>/dev/null || true' EXIT
+trap 'kill "$pid" "$web" 2>/dev/null || true' EXIT
 for _ in $(seq 1 50); do grep -q listening "$log" && break; sleep 0.1; done
 grep -q listening "$log" || { cat "$log"; exit 1; }
 
@@ -56,6 +70,27 @@ for _ in $(seq 1 100); do grep -q "alert $t: 已完成" "$log" && break; sleep 0
 check "watcher alerts when an agent is blocked" 'grep -q "alert $t: 需要你处理 · fake-agent" "$log"'
 check "watcher alerts when an agent finishes a turn" 'grep -q "alert $t: 已完成 · fake-agent" "$log"'
 check "without a push key nothing is sent" 'grep -q "push $t not sent: no push key" "$log"'
+
+out=$(probe --creds "$state/probe.json" --control '{"t":"transcript","id":7,"app":"claude-code","cwd":"'$proj'"}')
+check "transcript: messages, tool call and result" 'grep -q "\"列出文件\"" <<<"$out" && grep -q "\"name\": \"Bash\"" <<<"$out" && grep -q "\"a.txt\"" <<<"$out" && grep -q "只有 a.txt" <<<"$out"'
+offset=$(sed -n 's/.*"offset": \([0-9]*\).*/\1/p' <<<"$out")
+file=$(sed -n 's/.*"file": "\(.*\)".*/\1/p' <<<"$out")
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"新的一句"}]}}' >>"$file"
+out=$(probe --creds "$state/probe.json" --control '{"t":"transcript","id":8,"app":"claude-code","cwd":"'$proj'","file":"'"$file"'","offset":'"$offset"'}')
+check "transcript: only what was added since" 'grep -q "新的一句" <<<"$out" && ! grep -q "列出文件" <<<"$out" && grep -q "\"reset\": false" <<<"$out"'
+
+out=$(probe --creds "$state/probe.json" --control '{"t":"ports","id":9}')
+check "ports: the local web server is listed with its title" 'grep -q "\"port\": $web_port" <<<"$out" && grep -q "E2E Site" <<<"$out"'
+check "ports: the bridge itself is not listed" '! grep -q "\"port\": $port," <<<"$out"'
+out=$(probe --creds "$state/probe.json" --control '{"t":"forward","id":10,"port":'"$web_port"'}')
+lp=$(sed -n 's/.*"listen_port": \([0-9]*\).*/\1/p' <<<"$out")
+tok=$(sed -n 's/.*"token": "\([0-9a-f]*\)".*/\1/p' <<<"$out")
+check "forward opened" '[[ -n $lp && -n $tok ]]'
+check "forward: no token, no page" '[[ $(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$lp/") == 403 ]]'
+check "forward: wrong token refused" '[[ $(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$lp/?__ddup=00") == 403 ]]'
+jar=$state/cookies
+check "forward: token link sets the cookie and serves the page" 'curl -s -L -c "$jar" -b "$jar" "http://127.0.0.1:$lp/?__ddup=$tok" | grep -q "E2E Site"'
+check "forward: later requests ride on the cookie" 'curl -s -b "$jar" "http://127.0.0.1:$lp/index.html" | grep -q hello'
 
 "$bin" --state-dir "$state" revoke probe >/dev/null
 out=$(probe --creds "$state/probe.json")

@@ -80,6 +80,29 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
 | App→ | `{"t":"push_test"}` | 立即发一条测试推送 |
 | ←桥 | `{"t":"push_result","re":"push_test"\|"push_token","ok":true,"detail":"…"}` | `re` 指明是哪条请求的结果 |
 | ←桥 | `{"t":"hc_closed","code":0}` | `hc connect` 退出了；App 应重连 |
+| App→ | `{"t":"transcript","id":1,"app":"claude-code","cwd":"…","pid":123,"file":"…","offset":0}` | 读 Agent 自己的会话记录（D32）。`file`/`offset` 是上次回复里的，第一次不带 |
+| ←桥 | `{"t":"transcript","id":1,"file":"…","offset":…,"reset":true,"truncated":true,"items":[{"k":"user"\|"assistant"\|"tool"\|"result","text":"…","name":"Bash","detail":"…","id":"…","err":false}]}` | `reset` 表示换了文件或第一次读，App 清空重来；`result` 用 `id` 对应它的 `tool`；出错时只有 `error` |
+| App→ | `{"t":"ports","id":2}` | Mac 上在监听、能回 HTTP 的端口 |
+| ←桥 | `{"t":"ports","id":2,"sites":[{"port":5173,"process":"node","pid":…,"cwd":"…","title":"…","status":200}]}` | 去掉 cwd 为 `/` 的系统服务；有标题的排前面 |
+| App→ | `{"t":"forward","id":3,"port":5173}` | 为这个端口开转发 |
+| ←桥 | `{"t":"forward","id":3,"port":5173,"listen_port":54321,"token":"…"}` | App 打开 `http://<连上的那个地址>:<listen_port>/路径?__ddup=<token>` |
+
+带 `id` 的请求在后台处理，回复按 `id` 对应，不挡终端数据。
+
+### 会话记录（`bridge/src/transcript.rs`）
+
+- 找文件：先按 core 报的前台进程 `foreground.pid` 找——Claude Code 读 `~/.claude/sessions/<pid>.json` 里的 `sessionId`，Codex 用 `lsof -p` 找它开着的 `rollout-*.jsonl`；找不到再取这个目录最新的会话（Claude：`~/.claude/projects/<cwd 非字母数字换成 ->/`；Codex：最近 7 天、`session_meta.cwd` 相同）。终端的 shell 目录和 Agent 的目录可能不同，所以 App 用的是前台进程的目录（`foreground.cwd`），桌面版也是这样。
+- 第一次读文件末尾 1.5 MB，最多 150 条；之后只读新增的整行。
+- 保留：用户的话、Agent 的文字、工具调用（一行摘要 + 详情）、工具结果（截到 2000 字）。丢掉：thinking/reasoning、系统注入的内容（`<…>` 开头、AGENTS.md）、子 Agent 的记录、元数据。
+- 摘要：Bash 用 `description`（命令放详情），Edit 显示文件、详情是 -/+ 行，Codex `exec` 从 JS 里取出 `cmd:"…"`，`apply_patch` 列出改的文件；Codex 的 `exec_command` 结果从 JSON 里取 `output`，非 0 退出码标成失败。
+- 格式没有公开文档，不认识的记录直接跳过。
+
+### 网页预览转发（`bridge/src/ports.rs`）
+
+- 每个目标端口一个转发，监听随机端口，和桥接服务一样只接受局域网、Tailscale 和本机地址；桥接服务退出时一起关掉。
+- 第一次请求必须带 `?__ddup=<token>`：回 302 和 `HttpOnly; SameSite=Lax` cookie，并去掉这个参数；之后每个请求都要带这个 cookie，否则返回 403。令牌比较用常数时间。
+- 转发前把 `Host`、`Origin`、`Referer` 改成 `localhost:<port>`（vite 等会检查），去掉转发自己的 cookie；普通请求加 `Connection: close`，一个连接一个请求；WebSocket 升级（热更新）原样双向转发。
+- 先连 `127.0.0.1`，不通再连 `[::1]`。
 
 ## 5. App 侧说的 core 协议（与桌面版相同）
 

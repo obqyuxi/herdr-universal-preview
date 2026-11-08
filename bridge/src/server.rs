@@ -3,6 +3,7 @@
 //! Also runs the push watcher.
 
 use crate::crypto::{self, Half, Records};
+use crate::ports::Forwards;
 use crate::push::{self, Pusher};
 use crate::state::{Config, PairError, Store};
 use crate::watch::{Alert, Tracker};
@@ -42,6 +43,7 @@ pub struct Ctx {
     /// Serialises read-modify-write of devices.json within this process.
     files: Mutex<()>,
     next_conn: AtomicU64,
+    forwards: Arc<Forwards>,
 }
 
 impl Ctx {
@@ -49,7 +51,16 @@ impl Ctx {
         let config = store.config()?;
         let identity = store.identity()?;
         let pusher = Pusher::load(&store.push_key_path())?;
-        Ok(Ctx { store, config, identity, pusher, foreground: Mutex::default(), files: Mutex::default(), next_conn: AtomicU64::new(1) })
+        Ok(Ctx {
+            store,
+            config,
+            identity,
+            pusher,
+            foreground: Mutex::default(),
+            files: Mutex::default(),
+            next_conn: AtomicU64::new(1),
+            forwards: Arc::default(),
+        })
     }
 
     pub fn hc_command(&self) -> Command {
@@ -319,10 +330,19 @@ async fn relay(
                             Some(&HC) => hc_in.write_all(&plain[1..]).await.context("hc connect stopped reading")?,
                             Some(&CONTROL) => {
                                 let v: Value = serde_json::from_slice(&plain[1..])?;
-                                if let Some(reply) = on_control(ctx, conn, device, &v).await {
-                                    let mut p = vec![CONTROL];
-                                    p.extend(serde_json::to_vec(&reply)?);
-                                    let _ = out_tx.send(p).await;
+                                // Requests that read files or the network answer later (matched by id), so the terminal keeps flowing.
+                                let (ctx, device, tx) = (ctx.clone(), device.to_owned(), out_tx.clone());
+                                let task = async move {
+                                    if let Some(reply) = on_control(&ctx, conn, &device, &v).await {
+                                        let mut p = vec![CONTROL];
+                                        p.extend(serde_json::to_vec(&reply).unwrap_or_default());
+                                        let _ = tx.send(p).await;
+                                    }
+                                };
+                                if matches!(serde_json::from_slice::<Value>(&plain[1..])?["t"].as_str(), Some("transcript" | "ports" | "forward")) {
+                                    tokio::spawn(task);
+                                } else {
+                                    task.await;
                                 }
                             }
                             _ => bail!("unknown message type"),
@@ -394,6 +414,35 @@ async fn on_control(ctx: &Arc<Ctx>, conn: u64, device: &str, v: &Value) -> Optio
             Some(match r {
                 Ok(m) => json!({"t": "push_result", "re": "push_test", "ok": true, "detail": m}),
                 Err(e) => json!({"t": "push_result", "re": "push_test", "ok": false, "detail": format!("{e:#}")}),
+            })
+        }
+        "transcript" => {
+            let (app, cwd) = (v["app"].as_str().unwrap_or_default().to_owned(), v["cwd"].as_str().unwrap_or_default().to_owned());
+            let (file, offset) = (v["file"].as_str().map(str::to_owned), v["offset"].as_u64());
+            let pid = v["pid"].as_u64().and_then(|p| u32::try_from(p).ok()).filter(|p| *p > 0);
+            let r = tokio::task::spawn_blocking(move || crate::transcript::read(&app, &cwd, pid, file.as_deref(), offset)).await;
+            Some(match r.map_err(|e| anyhow!(e)).and_then(|r| r) {
+                Ok(page) => {
+                    let mut j = serde_json::to_value(page).unwrap_or_default();
+                    j["t"] = json!("transcript");
+                    j["id"] = v["id"].clone();
+                    j
+                }
+                Err(e) => json!({"t": "transcript", "id": v["id"], "error": format!("{e:#}")}),
+            })
+        }
+        "ports" => {
+            let mut skip = ctx.forwards.listen_ports();
+            skip.extend(ctx.config.listen.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()));
+            let sites = crate::ports::list(&skip).await;
+            Some(json!({"t": "ports", "id": v["id"], "sites": sites}))
+        }
+        "forward" => {
+            let port = v["port"].as_u64().and_then(|p| u16::try_from(p).ok()).unwrap_or(0);
+            let ip = ctx.config.listen.rsplit_once(':').map_or("0.0.0.0", |(h, _)| h).trim_matches(['[', ']']).to_owned();
+            Some(match ctx.forwards.open(&ip, port, ctx.config.allow_public).await {
+                Ok(f) => json!({"t": "forward", "id": v["id"], "port": port, "listen_port": f.listen_port, "token": f.token}),
+                Err(e) => json!({"t": "forward", "id": v["id"], "port": port, "error": format!("{e:#}")}),
             })
         }
         _ => None,

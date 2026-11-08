@@ -235,6 +235,10 @@ struct Index {
             .fontSize(12).fontColor('#9AA0A6').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Button('网页').fontSize(13).height(30).padding({ left: 10, right: 10 })
+        .backgroundColor('#22262B').fontColor('#C9CDD2')
+        .enabled(this.conn === Conn.Ready)
+        .onClick(() => router.pushUrl({ url: 'pages/WebPreview' }))
       Button('+').fontSize(24).backgroundColor(Color.Transparent).fontColor('#E6E6E6')
         .enabled(this.conn === Conn.Ready)
         .onClick(() => router.pushUrl({ url: 'pages/NewTask' }))

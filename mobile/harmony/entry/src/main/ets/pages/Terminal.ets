@@ -11,6 +11,8 @@ import { StreamSink } from '../core/Hc';
 import { PromptInfo, PromptOption } from '../core/Prompt';
 import { load, pickFiles, pickPhotos, takePhoto } from '../common/Attach';
 import { PreviewParams } from './Preview';
+import { ChatView } from '../common/Chat';
+import { localPath, localPort, WebParams } from './WebPreview';
 
 class QuickKey {
   label: string;
@@ -77,6 +79,14 @@ class Attachment {
 
 /// The font size people pinched to, kept while the app runs.
 let fontSize = 12;
+/// Open agents on their conversation (else the terminal); remembered while the app runs.
+let preferChat = true;
+// In the conversation, only the keys that steer an agent.
+const CHAT_KEYS = ['Esc', 'Enter', 'Tab', '^C'];
+
+function chatApp(app: string): boolean {
+  return app.includes('claude') || app.includes('codex');
+}
 let nextAttachment = 1;
 
 @Entry
@@ -93,6 +103,13 @@ struct Terminal {
   @State promptOpen: boolean = true;
   @State attachments: Attachment[] = [];
   @State altHint: string = '';
+  @State chat: boolean = false;
+  @State hasChat: boolean = false;
+  @State app: string = '';
+  @State cwd: string = '';
+  @State pid: number = 0;
+  @State visibleNow: boolean = true;
+  @State nudge: number = 0;
   private forceNext: boolean = false;
   private fitCols: number = 0;
   private fitRows: number = 0;
@@ -121,11 +138,13 @@ struct Terminal {
 
   onPageShow(): void {
     this.visible = true;
+    this.visibleNow = true;
     this.refresh();
   }
 
   onPageHide(): void {
     this.visible = false;
+    this.visibleNow = false;
   }
 
   private agent(): Agent | undefined {
@@ -146,8 +165,16 @@ struct Terminal {
       return;
     }
     const folder = a.folder();
-    this.title = folder ? `${a.label()} · ${folder}` : a.label();
+    // With the 对话|终端 switch there's little room: the folder says which one it is.
+    this.title = folder && chatApp(a.app) ? folder : folder ? `${a.label()} · ${folder}` : a.label();
     this.detail = a.detail();
+    if (chatApp(a.app) && !this.hasChat) {
+      this.chat = preferChat;
+    }
+    this.hasChat = chatApp(a.app);
+    this.app = a.app;
+    this.cwd = a.dir();
+    this.pid = a.fgPid;
     const wasBlocked = this.group === Group.NeedsYou;
     this.group = a.group();
     const p = a.group() === Group.NeedsYou ? a.prompt : null;
@@ -283,6 +310,7 @@ struct Terminal {
     }
     const f = force || this.forceNext;
     Session.shared.sendText(this.address, text, f).then(() => {
+      this.nudge++;
       this.input = '';
       this.attachments = [];
       this.forceNext = false;
@@ -344,16 +372,25 @@ struct Terminal {
 
   private openPath(path: string): void {
     const a = this.agent();
+    const port = localPort(path);
+    if (port > 0) {
+      const w = new WebParams();
+      w.port = port;
+      w.path = localPath(path);
+      w.cwd = a?.dir() ?? '';
+      router.pushUrl({ url: 'pages/WebPreview', params: w });
+      return;
+    }
     const p = new PreviewParams();
     p.path = path;
-    p.cwd = a?.cwd ?? '';
+    p.cwd = a?.dir() ?? '';
     router.pushUrl({ url: 'pages/Preview', params: p });
   }
 
   private openChanges(): void {
     const a = this.agent();
     const p = new PreviewParams();
-    p.cwd = a?.cwd ?? '';
+    p.cwd = a?.dir() ?? '';
     p.changes = true;
     router.pushUrl({ url: 'pages/Preview', params: p });
   }
@@ -432,12 +469,27 @@ struct Terminal {
             .fontColor(this.notice ? '#FF8A5D' : this.group === Group.NeedsYou ? '#FFB547' : '#9AA0A6')
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        if (this.hasChat) {
+          Row() {
+            ForEach(['对话', '终端'], (label: string, i: number) => {
+              Text(label).fontSize(12).height(26).padding({ left: 10, right: 10 }).borderRadius(13)
+                .fontColor((i === 0) === this.chat ? '#101114' : '#C9CDD2')
+                .backgroundColor((i === 0) === this.chat ? '#E6E6E6' : Color.Transparent)
+                .onClick(() => {
+                  this.chat = i === 0;
+                  preferChat = this.chat;
+                })
+            }, (label: string) => label)
+          }.padding(2).borderRadius(15).backgroundColor('#22262B')
+        }
         Button('改动').fontSize(12).height(28).padding({ left: 10, right: 10 })
           .backgroundColor('#22262B').fontColor('#C9CDD2')
           .onClick(() => this.openChanges())
-        Button(this.phoneWidth ? '手机宽度' : '原尺寸').fontSize(12).height(28).padding({ left: 10, right: 10 })
-          .backgroundColor('#22262B').fontColor('#C9CDD2')
-          .onClick(() => this.toggleWidth())
+        if (!(this.hasChat && this.chat)) {
+          Button(this.phoneWidth ? '手机宽度' : '原尺寸').fontSize(12).height(28).padding({ left: 10, right: 10 })
+            .backgroundColor('#22262B').fontColor('#C9CDD2')
+            .onClick(() => this.toggleWidth())
+        }
       }
       .width('100%').padding({ right: 10, top: 6, bottom: 6 })
 
@@ -451,6 +503,17 @@ struct Terminal {
           .minLogicalFontSize(1)
           .domStorageAccess(false)
           .onPageEnd(() => this.initPorts())
+        if (this.hasChat && this.chat) {
+          ChatView({
+            active: this.chat && this.visibleNow,
+            app: this.app,
+            cwd: this.cwd,
+            pid: this.pid,
+            working: this.group === Group.Working,
+            nudge: this.nudge,
+            onOpenFile: (path: string) => this.openPath(path)
+          })
+        }
         if (this.altHint) {
           Text(this.altHint).fontSize(13).fontColor('#101114').backgroundColor('#E6E6E6')
             .padding({ left: 12, right: 12, top: 4, bottom: 4 }).borderRadius(12).margin({ top: 8 })
@@ -463,7 +526,7 @@ struct Terminal {
 
       Scroll() {
         Row({ space: 6 }) {
-          ForEach(QUICK, (k: QuickKey) => {
+          ForEach(this.hasChat && this.chat ? QUICK.filter((k: QuickKey) => CHAT_KEYS.includes(k.label)) : QUICK, (k: QuickKey) => {
             Button(k.label).fontSize(14).height(34).padding({ left: 12, right: 12 })
               .backgroundColor('#22262B').fontColor('#E6E6E6')
               .onClick(() => this.press(k.keys, ''))
@@ -481,7 +544,7 @@ struct Terminal {
         Text('+').fontSize(26).fontColor('#C9CDD2').width(40).height(40).textAlign(TextAlign.Center)
           .borderRadius(20).backgroundColor('#22262B')
           .onClick(() => this.attachMenu())
-        TextInput({ text: this.input, placeholder: '发给这个 Agent（发送后自动回车）' })
+        TextInput({ text: this.input, placeholder: this.hasChat && this.chat ? '给 Agent 发消息' : '发给这个 Agent（发送后自动回车）' })
           .id('term-input')
           .layoutWeight(1).height(40).fontSize(15)
           .fontColor('#E6E6E6').placeholderColor('#6B7075').backgroundColor('#1C1E23').caretColor('#4C9AFF')

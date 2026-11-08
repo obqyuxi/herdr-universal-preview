@@ -127,8 +127,13 @@ function pathAt(col, row) {
   }
   const rowStart = (offsets.find((o) => o[0] === row) || [row, 0])[1];
   const at = rowStart + col;
-  PATH.lastIndex = 0;
+  // A dev server's address ("Local: http://localhost:5173/") opens the web preview.
+  const URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?[^\s'"<>)\]]*/g;
   let m;
+  while ((m = URL_RE.exec(text)) !== null) {
+    if (at >= m.index && at < m.index + m[0].length) return m[0].replace(/[.,;:]+$/, '');
+  }
+  PATH.lastIndex = 0;
   while ((m = PATH.exec(text)) !== null) {
     if (at >= m.index && at < m.index + m[0].length) {
       const p = m[0].replace(/[.,;:)]+$/, '');
