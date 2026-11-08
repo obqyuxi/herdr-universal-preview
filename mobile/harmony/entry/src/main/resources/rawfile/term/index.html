@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #101114; overflow: hidden; }
+  #wrap { position: absolute; inset: 0; overflow: hidden; }
+  #wrap.scroll { overflow: auto; -webkit-overflow-scrolling: touch; }
+  #t { transform-origin: 0 0; display: inline-block; padding: 2px 0 0 2px; }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="t"></div></div>
+<script src="xterm.js"></script>
+<script>
+// The terminal screen, fed by the ArkTS page over a WebMessagePort.
+//   page -> app: {"t":"size",cols,rows}  how much fits at a readable font size
+//   app -> page: ArrayBuffer (bytes from the core), {"t":"init"|"resize",cols,rows,mode}
+// mode "phone": the terminal has the phone's size, drawn 1:1.
+// mode "full": the terminal keeps the desktop's size; scaled down to the width
+//   (a CSS transform, not a tiny font: the web view enlarges tiny fonts, which
+//   made glyphs overlap), double-tap for 1:1 with scrolling.
+// Input never goes through xterm (no soft keyboard here); the app's quick keys
+// and text box send it.
+const FONT = 12;
+const wrap = document.getElementById('wrap');
+const box = document.getElementById('t');
+let term = null;
+let port = null;
+let mode = 'phone';
+let zoomed = false;
+let sent = '';
+
+function make() {
+  term = new Terminal({
+    cols: 80, rows: 24,
+    fontSize: FONT,
+    lineHeight: 1.0,
+    disableStdin: true,
+    cursorBlink: false,
+    scrollback: 5000,
+    fontFamily: '"HarmonyOS Sans Mono", "Noto Sans Mono CJK SC", "Droid Sans Mono", monospace',
+    theme: { background: '#101114', foreground: '#e6e6e6', cursor: '#e6e6e6' },
+  });
+  term.open(box);
+  if (term.textarea) {
+    term.textarea.setAttribute('readonly', 'readonly');
+    term.textarea.setAttribute('inputmode', 'none');
+    term.textarea.setAttribute('tabindex', '-1');
+  }
+}
+
+// xterm's own cell size; a measured span if that internal API ever moves.
+function cell() {
+  try {
+    const d = term._core._renderService.dimensions.css.cell;
+    if (d.width > 0 && d.height > 0) return { w: d.width, h: d.height };
+  } catch (e) {}
+  const s = document.createElement('span');
+  s.style.cssText = `font: ${FONT}px ${term.options.fontFamily}; position:absolute; visibility:hidden; white-space:pre`;
+  s.textContent = 'W'.repeat(20);
+  document.body.appendChild(s);
+  const r = { w: s.getBoundingClientRect().width / 20, h: s.getBoundingClientRect().height };
+  s.remove();
+  return r;
+}
+
+function fit() {
+  const c = cell();
+  return {
+    cols: Math.max(20, Math.floor((wrap.clientWidth - 4) / c.w)),
+    rows: Math.max(8, Math.floor((wrap.clientHeight - 4) / c.h)),
+  };
+}
+
+function report() {
+  if (!port || !term) return;
+  const f = fit();
+  const s = JSON.stringify({ t: 'size', cols: f.cols, rows: f.rows });
+  if (s === sent) return;
+  sent = s;
+  port.postMessage(s);
+  if (mode === 'phone' && (term.cols !== f.cols || term.rows !== f.rows)) {
+    term.resize(f.cols, f.rows);
+  }
+}
+
+function place() {
+  if (mode === 'full' && !zoomed) {
+    const c = cell();
+    const k = Math.min(1, (wrap.clientWidth - 4) / (term.cols * c.w));
+    box.style.transform = `scale(${k})`;
+    wrap.classList.remove('scroll');
+  } else {
+    box.style.transform = '';
+    wrap.classList.toggle('scroll', mode === 'full');
+  }
+  wrap.scrollLeft = 0;
+}
+
+function onMessage(ev) {
+  const d = ev.data;
+  if (d instanceof ArrayBuffer) {
+    term.write(new Uint8Array(d));
+    return;
+  }
+  let m;
+  try { m = JSON.parse(d); } catch (e) { return; }
+  if (m.t === 'init') {
+    mode = m.mode || 'phone';
+    zoomed = false;
+    term.reset();
+    term.resize(m.cols, m.rows);
+    place();
+  } else if (m.t === 'resize') {
+    term.resize(m.cols, m.rows);
+    place();
+  }
+}
+
+make();
+
+window.addEventListener('message', (e) => {
+  if (e.data === '__init_port__' && e.ports && e.ports[0]) {
+    port = e.ports[0];
+    port.onmessage = onMessage;
+    sent = '';
+    report();
+  }
+});
+
+// Double-tap (touch) or a double click (some input paths send only mouse events).
+let lastTap = 0;
+let lastToggle = 0;
+function toggleZoom() {
+  const now = Date.now();
+  if (mode !== 'full' || now - lastToggle < 500) return;
+  lastToggle = now;
+  zoomed = !zoomed;
+  if (term) setTimeout(() => term.clearSelection(), 0);
+  place();
+}
+document.addEventListener('touchend', () => {
+  const now = Date.now();
+  if (now - lastTap < 400) toggleZoom();
+  lastTap = now;
+});
+document.addEventListener('dblclick', toggleZoom);
+window.addEventListener('resize', () => { report(); if (term) place(); });
+</script>
+</body>
+</html>

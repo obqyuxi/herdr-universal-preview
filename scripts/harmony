@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Build and install the HarmonyOS app (mobile/harmony, D27) with the project-local
+# toolchain: Command Line Tools in .local/toolchain/harmony, a JDK in .local/toolchain/jdk.
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+
+usage() {
+  cat <<EOF
+Usage: scripts/harmony <command>
+
+  build        hvigorw assembleHap (debug, unsigned)
+  sign         sign the HAP with the debug certificate and profile in
+               ~/Library/Application Support/DD-up/harmony-signing (ddup-debug.{p12,cer,p7b})
+  devices      phones hdc can see (USB debugging on)
+  install      build, sign, then hdc install it on the connected phone and open it
+  udid         the connected phone's UDID (for registering it in AppGallery Connect)
+  env          print the environment the other commands use
+EOF
+}
+
+CLT=$HUP_LOCAL/toolchain/harmony/command-line-tools
+JDK=$(ls -d "$HUP_LOCAL"/toolchain/jdk/*/Contents/Home 2>/dev/null | head -1 || true)
+[[ -x $CLT/bin/hvigorw ]] || hup_die "no Command Line Tools in $CLT (see docs/harmony/SETUP.md)"
+[[ -n $JDK ]] || hup_die "no JDK in $HUP_LOCAL/toolchain/jdk (see docs/harmony/SETUP.md)"
+export DEVECO_SDK_HOME=$CLT/sdk JAVA_HOME=$JDK
+export PATH=$CLT/bin:$CLT/tool/node/bin:$CLT/sdk/default/openharmony/toolchains:$JDK/bin:$PATH
+APP=$HUP_ROOT/mobile/harmony
+HAP=$APP/entry/build/default/outputs/default
+
+build() {
+  (cd "$APP" && ohpm install >/dev/null && hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon 2>&1 \
+    | grep -E 'ERROR|Error Message|At File|BUILD|COMPILE RESULT' || true)
+  ls "$HAP"/*.hap 2>/dev/null || hup_die "no HAP built"
+}
+
+SIGN="$HOME/Library/Application Support/DD-up/harmony-signing"
+
+sign() {
+  local in out
+  in=$(ls "$HAP"/*-unsigned.hap 2>/dev/null | head -1) || true
+  [[ -n $in ]] || hup_die "build first"
+  for f in ddup-debug.p12 ddup-debug.cer ddup-debug.p7b store.pass; do
+    [[ -f $SIGN/$f ]] || hup_die "missing $SIGN/$f (the profile needs the phone registered: docs/harmony/SETUP.md)"
+  done
+  out=${in%-unsigned.hap}-signed.hap
+  local pw; pw=$(cat "$SIGN/store.pass")
+  # hap-sign-tool takes passwords only as arguments; the keystore is a local debug key.
+  java -jar "$CLT/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" sign-app -mode localSign \
+    -keyAlias ddup-debug -signAlg SHA256withECDSA -keystoreFile "$SIGN/ddup-debug.p12" -keystorePwd "$pw" -keyPwd "$pw" \
+    -appCertFile "$SIGN/ddup-debug.cer" -profileFile "$SIGN/ddup-debug.p7b" -inFile "$in" -outFile "$out" -signCode 1 >/dev/null
+  echo "$out"
+}
+
+case ${1:-} in
+  -h|--help|"") usage ;;
+  env) echo "DEVECO_SDK_HOME=$DEVECO_SDK_HOME"; echo "JAVA_HOME=$JAVA_HOME"; echo "hdc=$(command -v hdc)" ;;
+  build) build ;;
+  sign) sign ;;
+  devices) hdc list targets ;;
+  udid) hdc shell bm get --udid ;;
+  install)
+    build
+    hap=$(sign)
+    hdc install -r "$hap"
+    hdc shell aa start -a EntryAbility -b herdr.hm.ddup ;;
+  *) usage >&2; exit 2 ;;
+esac

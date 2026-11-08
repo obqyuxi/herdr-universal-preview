@@ -11,6 +11,30 @@
 
 **2026-11-05：右键终端里的文件或文件夹链接，可以选 "Reveal in Finder"**（D25，补丁 0007）。已完成：编译通过；上游测试通过；补丁可以干净应用；菜单 mod 通过 `check`；开发版里 `native.reveal` 对中文文件名返回 ok，相对路径和不存在的路径都被拒绝。尚未完成：右键菜单的 GUI 验收，以及 Finder 是否真的选中了文件（都要用户确认）。DD-up 要等用户退出后才能用 `scripts/install` 重新安装。
 
+**2026-11-07：鸿蒙版 DD-up，第一版代码完成**（D27；设计见 `docs/harmony/DESIGN.md`，使用说明见 `docs/harmony/SETUP.md`）。
+- 已验证（本地，都连隔离的测试 core `hup-dev`）：
+  - `bridge/`（`ddup-bridge`）：单元测试 16 项，clippy、rustfmt 通过。
+  - `tests/integration/bridge-e2e` 15/15：配对、认证、加密转发、一次性配对码、吊销，以及推送监视能发现 blocked 和已完成。
+  - `tests/integration/harmony-logic` 19/19：App 的 `ets/core` 原样在 Node 里跑（kit 用替身，WebSocket 消息被随机拆开投递），覆盖 DDB1 向量、配对、事件分组、attach、send、`herdr.seen`、令牌重连。
+  - 一键运行：`scripts/test --bridge`。
+- 未验证：
+  - ArkTS 编译：本机没有 DevEco Studio。
+  - 鸿蒙真机 GUI：`tests/gui/HARMONY_CHECKLIST.md`。
+  - Push Kit 真实发送：需要用户在 AppGallery Connect 建项目、开通推送并提供服务账号密钥。JWT 签名已在本地自验。
+- 没做的：桥接服务没有接正式 core 运行，也没装 LaunchAgent。这两件要用户自己启动。
+- 下一步：用户安装 DevEco Studio，打开 `mobile/harmony` 编译，把报错发回来修；建 AGC 项目，填 `client_id`，放 `push-key.json`；然后按 H1–H15 验收。
+
+**2026-11-07 晚：鸿蒙版继续**（D28）。
+- 桥接服务已作为 LaunchAgent 常驻，连日常 core，推送鉴权已通过。
+- DD-up 已用 `--mods-only` 装上手机按钮和二维码弹窗。开发版里截图确认过弹窗，二维码能解出正确的链接。在日常 DD-up 窗口里看到按钮，还需要用户确认。
+- 鸿蒙 App 已用命令行编译通过（未签名）。调试证书已建好。
+- 手机（HarmonyOS 7，API 26）已连上。设备已注册，调试 Profile `ddup-debug` 已生成（有效期到 2027-11-07），`scripts/harmony install` 已经签名、安装并在手机上启动了 App（用 hdc 截图确认看到了配对页）。
+- 2026-11-08：用户扫码配对成功，反馈终端画面挤在一起。真机全面测试和修复见 D29，修完后手机已配回日常 core。
+- 还缺：
+  - 用户自己的使用确认。
+  - Tailscale：不在同一个 Wi-Fi 时连不上。
+  - 自分类权益：推送目前是静默的。
+
 **用户 2026-11-02 收窄范围**：只要两件事，验收以这两件事为准。
 
 1. Files 面板点 Word/Excel/PPT/PDF/图片/音视频就能直接看（`mods/files-plus`）。

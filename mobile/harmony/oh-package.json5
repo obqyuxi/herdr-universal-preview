@@ -1,0 +1,6 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "DD-up for HarmonyOS: a remote client for herdr-core through ddup-bridge (D27)",
+  "dependencies": {},
+  "devDependencies": {}
+}

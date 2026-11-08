@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Run ddup-bridge for the everyday core as a LaunchAgent (D27): starts at
+# login, restarts if it stops. The phone button in DD-up pairs through it.
+set -euo pipefail
+. "$(dirname "$0")/lib/env.sh"
+
+LABEL=dev.ddup.bridge
+BIN_DIR="$HOME/Library/Application Support/DD-up/bin"
+BIN="$BIN_DIR/ddup-bridge"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/DD-up/bridge.log"
+DOMAIN="gui/$(id -u)"
+
+usage() {
+  cat <<EOF
+Usage: scripts/bridge-service <command>
+
+  install     build ddup-bridge (release), copy it to $BIN,
+              write $PLIST and start it
+  uninstall   stop it and remove the LaunchAgent and binary (pairings and keys stay)
+  restart     restart the running service
+  status      launchd state, listening port, ddup-bridge status
+  logs        follow $LOG
+EOF
+}
+
+loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; }
+
+write_plist() {
+  mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+  [[ -f $PLIST ]] && cp "$PLIST" "$PLIST.backup-$(date +%Y%m%d-%H%M%S)"
+  /usr/bin/python3 -I - "$PLIST" "$BIN" "$LOG" "$LABEL" <<'PY'
+import plistlib, sys
+path, binary, log, label = sys.argv[1:]
+plistlib.dump({
+    "Label": label,
+    "ProgramArguments": [binary, "serve"],
+    "RunAtLoad": True,
+    "KeepAlive": True,
+    "ThrottleInterval": 10,
+    "ProcessType": "Background",
+    "StandardOutPath": log,
+    "StandardErrorPath": log,
+}, open(path, "wb"))
+PY
+}
+
+case ${1:-} in
+  -h|--help|"") usage ;;
+  install)
+    hup_toolchain
+    (cd "$HUP_ROOT/bridge" && cargo build --release --quiet)
+    mkdir -p "$BIN_DIR"
+    loaded && launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+    install -m 755 "$HUP_ROOT/bridge/target/release/ddup-bridge" "$BIN"
+    write_plist
+    launchctl bootstrap "$DOMAIN" "$PLIST"
+    for _ in $(seq 1 30); do grep -q listening "$LOG" 2>/dev/null && break; sleep 0.2; done
+    "$BIN" status
+    echo "service: $(launchctl print "$DOMAIN/$LABEL" | awk -F'= ' '/state =/{print $2; exit}')  log: $LOG"
+    ;;
+  uninstall)
+    loaded && launchctl bootout "$DOMAIN/$LABEL" || true
+    rm -f "$PLIST" "$BIN"
+    echo "removed the service; pairings and keys stay in ~/Library/Application Support/DD-up/bridge"
+    ;;
+  restart) launchctl kickstart -k "$DOMAIN/$LABEL" ;;
+  status)
+    if loaded; then launchctl print "$DOMAIN/$LABEL" | awk '/state =|pid =|last exit code/'; else echo "not installed"; fi
+    [[ -x $BIN ]] && "$BIN" status
+    ;;
+  logs) tail -f "$LOG" ;;
+  *) usage >&2; exit 2 ;;
+esac

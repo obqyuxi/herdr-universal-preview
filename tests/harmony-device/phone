@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Drive the connected phone for device tests (uitest via hdc). Read-only on the Mac.
+#   phone shot NAME        screenshot -> .local/phone-shots/NAME.jpeg (900 px tall)
+#   phone tap X Y          tap at device pixels
+#   phone text X Y TEXT    tap a field and type TEXT
+#   phone find TEXT        print "x y" (center) of the first node whose text contains TEXT
+#   phone key KEY          Back / Home ...
+#   phone swipe X1 Y1 X2 Y2
+set -euo pipefail
+root=$(cd "$(dirname "$0")/../.." && pwd)
+H=$root/.local/toolchain/harmony/command-line-tools/sdk/default/openharmony/toolchains/hdc
+out=$root/.local/phone-shots; mkdir -p "$out"
+case $1 in
+  shot) "$H" shell uitest screenCap -p /data/local/tmp/s.png >/dev/null; "$H" file recv /data/local/tmp/s.png "$out/$2.png" >/dev/null
+        sips -s format jpeg -Z 900 "$out/$2.png" --out "$out/$2.jpeg" >/dev/null; rm -f "$out/$2.png"; echo "$out/$2.jpeg" ;;
+  tap) "$H" shell uitest uiInput click "$2" "$3" >/dev/null ;;
+  text) "$H" shell uitest uiInput inputText "$2" "$3" "$4" >/dev/null ;;
+  key) "$H" shell uitest uiInput keyEvent "$2" >/dev/null ;;
+  swipe) "$H" shell uitest uiInput swipe "$2" "$3" "$4" "$5" >/dev/null ;;
+  find)
+    "$H" shell uitest dumpLayout -p /data/local/tmp/l.json >/dev/null; "$H" file recv /data/local/tmp/l.json "$out/layout.json" >/dev/null
+    /usr/bin/python3 -I - "$out/layout.json" "$2" <<'PY'
+import json, re, sys
+want = sys.argv[2]
+def walk(n):
+    a = n.get("attributes", {})
+    t = a.get("text", "") or a.get("description", "")
+    if want in t and a.get("bounds"):
+        x1, y1, x2, y2 = map(int, re.findall(r"-?\d+", a["bounds"]))
+        print((x1 + x2) // 2, (y1 + y2) // 2); sys.exit(0)
+    for c in n.get("children", []): walk(c)
+walk(json.load(open(sys.argv[1])))
+sys.exit(1)
+PY
+    ;;
+esac

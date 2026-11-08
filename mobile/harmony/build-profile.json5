@@ -1,0 +1,22 @@
+{
+  "app": {
+    // DevEco Studio fills this in with automatic signing (File > Project Structure > Signing Configs).
+    // Push needs a signature tied to the AppGallery Connect app, not the "unassociated" mode.
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        // HKDF needs API 12 (compatible); built against HarmonyOS 26.0.0 (Command Line Tools 26.0.0.865).
+        "compatibleSdkVersion": "5.0.0(12)",
+        "targetSdkVersion": "26.0.0",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": { "strictMode": { "caseSensitiveCheck": true, "useNormalizedOHMUrl": true } }
+      }
+    ],
+    "buildModeSet": [{ "name": "debug" }, { "name": "release" }]
+  },
+  "modules": [
+    { "name": "entry", "srcPath": "./entry", "targets": [{ "name": "default", "applyToProducts": ["default"] }] }
+  ]
+}

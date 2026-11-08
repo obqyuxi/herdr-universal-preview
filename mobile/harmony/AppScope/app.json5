@@ -1,0 +1,11 @@
+{
+  "app": {
+    // Must match the app created in AppGallery Connect (Push Kit checks it).
+    "bundleName": "herdr.hm.ddup",
+    "vendor": "ddup",
+    "versionCode": 1000000,
+    "versionName": "0.1.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

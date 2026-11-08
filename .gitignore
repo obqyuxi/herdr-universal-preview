@@ -11,3 +11,14 @@ target/
 # Python
 __pycache__/
 .venv/
+# HarmonyOS build outputs (mobile/harmony)
+mobile/harmony/**/build/
+mobile/harmony/**/oh_modules/
+mobile/harmony/.hvigor/
+mobile/harmony/.idea/
+mobile/harmony/local.properties
+mobile/harmony/**/*.hap
+# AppGallery Connect files with client_secret / api_key (kept local, never committed)
+harmonyOS/
+**/agconnect-services.json
+**/push-key.json

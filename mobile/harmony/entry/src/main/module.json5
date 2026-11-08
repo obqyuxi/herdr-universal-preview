@@ -1,0 +1,38 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": ["phone", "tablet", "2in1"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "metadata": [
+      // Push Kit: the Client ID from AppGallery Connect > Project settings > App information.
+      { "name": "client_id", "value": "YOUR_AGC_APP_ID" }
+    ],
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "launchType": "singleton",
+        "skills": [
+          // The home skill must not have uris, or push messages are not delivered.
+          { "entities": ["entity.system.home"], "actions": ["ohos.want.action.home"] },
+          // A scanned ddup://pair link (system camera or scanner) opens DD-up and pairs.
+          { "actions": ["ohos.want.action.viewData"], "uris": [{ "scheme": "ddup", "host": "pair" }] }
+        ]
+      }
+    ],
+    "requestPermissions": [
+      { "name": "ohos.permission.INTERNET" }
+    ]
+  }
+}

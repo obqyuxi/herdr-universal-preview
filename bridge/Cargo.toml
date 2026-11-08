@@ -1,0 +1,30 @@
+[package]
+name = "ddup-bridge"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Lets the DD-up HarmonyOS app reach herdr-core on this Mac: encrypted WebSocket relay of `hc connect`, QR pairing, Push Kit alerts (D27)"
+
+[dependencies]
+aes-gcm = "0.10"
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+hkdf = "0.12"
+if-addrs = "0.13"
+qrcode = { version = "0.14", default-features = false }
+rand_core = { version = "0.6", features = ["getrandom"] }
+rsa = { version = "0.9", features = ["sha2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "io-util", "sync", "time", "signal"] }
+tokio-tungstenite = "0.24"
+ureq = { version = "2", features = ["json"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+
+[profile.release]
+strip = true

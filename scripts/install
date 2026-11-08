@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
 # Install the everyday edition (name in brand.env, e.g. DD-up) beside the official Herdr.
-# Adds the app, three mods and one layout; records them in a manifest.
+# Adds the app, five mods and one layout; records them in a manifest.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 case ${1:-} in
   --layout-from) shift; exec /usr/bin/python3 -I "$here/lib/install.py" add-layout "$@" ;;
   -h|--help) cat <<USAGE
-Usage: scripts/install [--dry-run] [--app-dir DIR]
+Usage: scripts/install [--dry-run] [--app-dir DIR] [--mods-only]
        scripts/install --layout-from NAME [--dry-run]
 
   --layout-from NAME  build the <LAYOUT> layout on your own layout NAME (e.g. main-folders):
-              Files -> files-plus, tabs -> tabs-plus, a browser in the Files panel;
+              Files -> files-plus, tabs -> tabs-plus, a browser in the Files panel,
+              a phone button beside Settings (workspace-chrome-plus);
               NAME itself is left as it is. Remembered for later installs.
               Without it: the official main layout + DD-up.
   Replacing only mods/layouts works while the app is open; a new app build needs it quit.
 
   Build first: scripts/build --daily (artifacts/apps.noindex/<APP_NAME>.app).
   Adds  DIR/<APP_NAME>.app (default ~/Applications),
-        ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus},
+        ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus,workspace-chrome-plus,phone-pair},
         ~/.config/herdr-app/layouts/<LAYOUT>.json
   Refuses anything that exists and isn't ours. Never touches /Applications/Herdr.app,
   built-in mods/layouts, workspaces, terminals or agent sessions.
   --dry-run   list what would change; change nothing
+  --mods-only replace mods and the layout only; keep the installed app (works while it runs)
   Undo: scripts/uninstall (or scripts/rollback)
 USAGE
   exit 0 ;;

@@ -1,0 +1,12 @@
+{
+  "bridge_public": "pOCSkrZRwni5dyxWn1-puxPZBrRqtoyd-dwrRAn4ogk",
+  "bridge_secret": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+  "c2s_0_plain": "AXsidCI6ImF1dGgifQ",
+  "c2s_0_sealed": "_fCFCAX7xZrOsKUm9Rfs6TXB4_zKcFHAHsHRc4A",
+  "client_public": "zo060cy2M-x7cMF4FKXHbs0CloUFDTRHRboFhw5YfVk",
+  "client_secret": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+  "msg2": "Xf7dO2vUf2-ijuFdlp1bsOpTd01Ii9r53xxuASSz7yI",
+  "s2c_0_plain": "AGhlbGxv",
+  "s2c_0_sealed": "0_EQR4lMmRZjmEcA9l8yzzEmKYHLpA",
+  "server_ephemeral_secret": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+}

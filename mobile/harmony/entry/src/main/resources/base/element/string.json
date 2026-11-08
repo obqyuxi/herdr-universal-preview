@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "DD-up remote client" },
+    { "name": "EntryAbility_desc", "value": "Agents on your Mac" },
+    { "name": "EntryAbility_label", "value": "DD-up" }
+  ]
+}

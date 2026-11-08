@@ -3,7 +3,7 @@
 
 Adds, never overwrites what isn't ours:
   <app dir>/<APP_NAME>.app
-  ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus}
+  ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus,workspace-chrome-plus,phone-pair}
   ~/.config/herdr-app/layouts/<LAYOUT>.json
 Records each with a content fingerprint in
   ~/Library/Application Support/<APP_EXE>/install-manifest.json
@@ -25,7 +25,7 @@ MANIFEST = STATE / "install-manifest.json"
 # Built apps sit in a ".noindex" folder so Spotlight and Launchpad don't list them.
 BUILT = ROOT / "artifacts/apps.noindex" / f"{NAME}.app"
 OFFICIAL = Path("/Applications/Herdr.app")
-MODS = ["files-plus", "browser", "tabs-plus"]
+MODS = ["files-plus", "browser", "tabs-plus", "workspace-chrome-plus", "phone-pair"]
 LAYOUT = BRAND["LAYOUT"]
 
 
@@ -95,6 +95,9 @@ def derive_layout(base: str) -> dict:
             content["mod"] = "files-plus"; found["files"] += 1
         if isinstance(content, dict) and content.get("mod") == "tabs":
             content["mod"] = "tabs-plus"; found["tabs"] += 1
+        # The sidebar footer gets the phone button (D27); optional, layouts without it are fine.
+        if isinstance(content, dict) and content.get("mod") == "workspace-chrome":
+            content["mod"] = "workspace-chrome-plus"
         kids = node.get("children", [])
         if node.get("type") == "stack" and any(isinstance(k.get("content"), dict) and k["content"].get("mod") in ("files", "files-plus") for k in kids):
             if not any(isinstance(k.get("content"), dict) and k["content"].get("mod") == "browser" for k in kids):
@@ -190,8 +193,13 @@ def copy_atomic(src: Path, dst: Path):
         shutil.rmtree(old) if old.is_dir() else old.unlink()
 
 
-def install(app_dir: Path, dry: bool, base_arg=None):
+def install(app_dir: Path, dry: bool, base_arg=None, mods_only=False):
     built_ver, actions, conflicts, base, stale = plan_install(app_dir, base_arg)
+    if mods_only:
+        # Leave the installed (maybe running) app as it is; replace only mods and the layout.
+        if not (app_dir / f"{NAME}.app").exists():
+            die(f"--mods-only needs {NAME} installed first")
+        actions = [("same", k, d, s) if k == "app" else (a, k, d, s) for a, k, d, s in actions]
     print(f"{NAME} {built_ver} (official Herdr {official_version() or 'not found'}), home {APP_HOME}")
     print(f"  layout {LAYOUT}: {'from your ' + base + '.json (left as it is)' if base else 'official main + DD-up'}")
     for a, kind, dst, _ in actions:
@@ -224,7 +232,8 @@ def install(app_dir: Path, dry: bool, base_arg=None):
             continue
         shutil.rmtree(p) if p.is_dir() else p.unlink()
     STATE.mkdir(parents=True, exist_ok=True)
-    rev = plistlib.loads((BUILT / "Contents/Info.plist").read_bytes()).get("CFBundleVersion")
+    app_plist = (app_dir / f"{NAME}.app" if mods_only else BUILT) / "Contents/Info.plist"
+    rev = plistlib.loads(app_plist.read_bytes()).get("CFBundleVersion")
     MANIFEST.write_text(json.dumps({"installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "build": rev, "home": str(APP_HOME), "base": base, "entries": entries}, indent=2, ensure_ascii=False) + "\n")
     print(f"installed; manifest: {MANIFEST}")
 
@@ -272,7 +281,7 @@ if __name__ == "__main__":
     dry = "--dry-run" in rest
     if cmd == "install":
         app_dir = Path(next((rest[i + 1] for i, a in enumerate(rest) if a == "--app-dir"), HOME / "Applications"))
-        install(app_dir, dry)
+        install(app_dir, dry, mods_only="--mods-only" in rest)
     elif cmd == "add-layout":
         app_dir = Path(next((rest[i + 1] for i, a in enumerate(rest) if a == "--app-dir"), HOME / "Applications"))
         install(app_dir, dry, next((a for a in rest if not a.startswith("--") and a != str(app_dir)), ""))

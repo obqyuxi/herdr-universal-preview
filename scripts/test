@@ -6,25 +6,28 @@ set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: scripts/test [--patches] [--upstream] [--mods] [--all]
+Usage: scripts/test [--patches] [--upstream] [--mods] [--bridge] [--all]
 
   (default)   static checks (bash -n, shellcheck if present, JSON) and native crate
               unit tests + clippy
   --patches   also: fresh clone of the pinned commit, all patches must apply
   --upstream  also: cargo test --locked in the work copy (isolated env)
   --mods      also: herdr-app check for each mods/* folder with the dev app
+  --bridge    also: ddup-bridge and the HarmonyOS app's core modules against the
+              test core (tests/integration/bridge-e2e, harmony-logic; D27)
   --all       everything above
 EOF
 }
 
-patches=0 upstream=0 mods=0
+patches=0 upstream=0 mods=0 bridge=0
 while (($#)); do
   case $1 in
     -h|--help) usage; exit 0 ;;
     --patches) patches=1 ;;
     --upstream) upstream=1 ;;
     --mods) mods=1 ;;
-    --all) patches=1 upstream=1 mods=1 ;;
+    --bridge) bridge=1 ;;
+    --all) patches=1 upstream=1 mods=1 bridge=1 ;;
     *) usage >&2; exit 2 ;;
   esac
   shift
@@ -62,6 +65,11 @@ export CARGO_TARGET_DIR=$HUP_LOCAL/target-native
 (cd "$HUP_ROOT/native/herdr-native-view" && cargo fmt --check >/dev/null 2>&1) && result 0 "rustfmt (native)" || echo "note: rustfmt differences in native (not enforced)"
 unset CARGO_TARGET_DIR
 
+step "unit: bridge (ddup-bridge, D27)"
+(cd "$HUP_ROOT/bridge" && cargo test --quiet 2>&1 | grep -E "test result|FAILED|panicked") && result 0 "cargo test (bridge)" || result 1 "cargo test (bridge)"
+(cd "$HUP_ROOT/bridge" && cargo clippy --quiet --all-targets -- -D warnings 2>&1 | tail -20) && result 0 "clippy (bridge)" || result 1 "clippy (bridge)"
+(cd "$HUP_ROOT/bridge" && cargo fmt --check >/dev/null 2>&1) && result 0 "rustfmt (bridge)" || result 1 "rustfmt (bridge)"
+
 if [[ -d $HUP_ROOT/tests/unit ]] && compgen -G "$HUP_ROOT/tests/unit/*.test.mjs" >/dev/null; then
   step "unit: mods (node --test)"
   node --test "$HUP_ROOT"/tests/unit/*.test.mjs && result 0 "mod unit tests" || result 1 "mod unit tests"
@@ -76,6 +84,14 @@ if (( upstream )); then
   step "upstream: cargo test --locked (isolated env)"
   log=$HUP_LOGS/upstream-test.log
   ( hup_isolate; cd "$HUP_UPSTREAM" && cargo test --locked ) >"$log" 2>&1 && result 0 "upstream tests ($log)" || { tail -30 "$log"; result 1 "upstream tests ($log)"; }
+fi
+
+if (( bridge )); then
+  step "bridge: end to end against the test core (D27)"
+  log=$HUP_LOGS/test-bridge-e2e.log
+  "$HUP_ROOT/tests/integration/bridge-e2e" >"$log" 2>&1 && result 0 "bridge-e2e ($log)" || { tail -20 "$log"; result 1 "bridge-e2e ($log)"; }
+  log=$HUP_LOGS/test-harmony-logic.log
+  "$HUP_ROOT/tests/integration/harmony-logic" >"$log" 2>&1 && result 0 "harmony-logic ($log)" || { tail -20 "$log"; result 1 "harmony-logic ($log)"; }
 fi
 
 if (( mods )); then

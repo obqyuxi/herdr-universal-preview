@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# The HarmonyOS app's core modules (mobile/harmony/entry/src/main/ets/core),
+# run unchanged under Node with shimmed kits (tests/harmony-logic/shim_kit.ts):
+# DDB1 vectors, then pairing, events, attach, send, herdr.seen and reconnect
+# against ddup-bridge and the test core. Not a substitute for a device build.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/../.." && pwd)
+case ${1:-} in -h|--help) echo "Usage: tests/integration/harmony-logic   (needs node >= 23; starts the test core if needed)"; exit 0 ;; esac
+# shellcheck source=../../scripts/lib/env.sh
+. "$root/scripts/lib/env.sh"
+hup_toolchain
+hup_ensure_short_link
+(cd "$root/bridge" && cargo build -q)
+bin=$root/bridge/target/debug/ddup-bridge
+"$root/scripts/dev" core-up >/dev/null
+hup_isolate
+
+work=$HUP_LOCAL/harmony-logic
+rm -rf "$work"; mkdir -p "$work/src" "$work/state"
+# Same code; only the kit imports point at the shim, local imports get their
+# extension, and enums become const objects (Node runs TypeScript by erasing types).
+python3 -I - "$root/mobile/harmony/entry/src/main/ets/core" "$work/src" <<'PY'
+import pathlib, re, sys
+src, dst = map(pathlib.Path, sys.argv[1:])
+def enum(m):
+    body = re.sub(r"(\w+)\s*=\s*", r"\1: ", m.group(2))
+    return f"export const {m.group(1)} = {{{body}}} as const;\nexport type {m.group(1)} = number;"
+types = {}
+for f in src.glob("*.ets"):
+    types[f.stem] = set(re.findall(r"export interface (\w+)", f.read_text()))
+def mark(m):
+    names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+    t = types.get(m.group(2), set())
+    return "import { " + ", ".join(("type " + n) if n in t else n for n in names) + " } from './" + m.group(2) + "'"
+for f in src.glob("*.ets"):
+    s = f.read_text()
+    s = re.sub(r"import \{([^}]*)\} from '\./([A-Za-z]+)'", mark, s)
+    s = re.sub(r"from '@kit\.[A-Za-z]+'", "from './shim_kit.ts'", s)
+    s = re.sub(r"from '\./([A-Za-z]+)'", r"from './\1.ts'", s)
+    s = re.sub(r"export enum (\w+) \{([^}]*)\}", enum, s)
+    (dst / (f.stem + ".ts")).write_text(s)
+PY
+cp "$root/tests/harmony-logic/shim_kit.ts" "$root/tests/harmony-logic/main.ts" "$work/src/"
+
+port=17843
+python3 -I -c 'import json,sys; json.dump({"listen": "127.0.0.1:"+sys.argv[2], "hc": sys.argv[3], "session": sys.argv[4]}, open(sys.argv[1], "w"))' \
+  "$work/state/config.json" "$port" "$HUP_HC" "$HUP_SESSION"
+log=$HUP_LOGS/harmony-logic.log
+"$bin" --state-dir "$work/state" serve >"$log" 2>&1 &
+pid=$!
+agent=""; cat_t=""
+cleanup() {
+  kill "$pid" 2>/dev/null || true
+  for t in $agent $cat_t; do "$root/scripts/dev" hc kill "$t" >/dev/null 2>&1 || true; "$root/scripts/dev" hc rm "$t" >/dev/null 2>&1 || true; done
+}
+trap cleanup EXIT
+for _ in $(seq 1 50); do grep -q listening "$log" && break; sleep 0.1; done
+grep -q listening "$log" || { cat "$log"; exit 1; }
+
+addr() { python3 -I -c 'import json,sys;print(json.load(sys.stdin)["address"])'; }
+cat_t=$("$root/scripts/dev" hc run --bg --json -- cat | addr)
+agent=$("$root/scripts/dev" hc run --bg --json -- "$root/tests/fixtures/fake-agent.sh" | addr)
+link=$("$bin" --state-dir "$work/state" pair --host 127.0.0.1 --link-only)
+(cd "$work/src" && node --no-warnings main.ts "$root/bridge/testdata/vectors.json" "$link" "$agent" "$cat_t") || { echo "--- bridge log ($log)"; tail -20 "$log"; exit 1; }
