@@ -58,7 +58,7 @@
 
 **2026-11-09：Mac 上改用 DD-up 自己的 userspace tailscaled（`mac-ddup`）**（D36）。和 代理 App 不冲突。手机走 5G 已经能经它连上 Mac；Tailscale 断开时的推送也验证过。
 
-**2026-11-09：Files 右键菜单和 ⋯ 菜单**（只改 Mod，新 Mod `files-plus-menu`）。文件：在访达中显示、用默认应用打开；文件夹：在访达中打开。预览页右上角的 ⋯ 打开同一个菜单。用户不要放大（触控板双指就能缩放）和复制路径，已删掉。files-plus 和菜单的文字随 macOS 语言（`AppleLanguages`）显示中文或英文。`scripts/test --mods` 已通过；已用 `scripts/install --mods-only` 装进日常 DD-up。
+**2026-11-09：Files 右键菜单和 ⋯ 菜单**（只改 Mod，新 Mod `files-plus-menu`）。文件：在访达中显示、用默认应用打开；文件夹：在访达中打开。预览页右上角的 ⋯ 打开同一个菜单。用户不要放大（触控板双指就能缩放）和复制路径，已删掉。files-plus 和菜单的文字随 macOS 语言（`AppleLanguages`）显示中文或英文。`scripts/test --mods` 已通过；已用 `scripts/install --mods-only` 装进日常 DD-up。用户已在 DD-up 里人工验收通过（2026-11-09）。
 
 **用户 2026-11-02 收窄范围**：只要两件事，验收以这两件事为准。
 
