@@ -77,6 +77,7 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
 | ←桥 | `{"t":"error","code":"unauthorized"\|"pair_expired"\|"pair_invalid"\|"hc_failed","msg":"…"}` | 随后断开（`hc_failed` 除外） |
 | App→ | `{"t":"push_token","token":"…"}` | 登记或更新华为 Push Token；空串表示关闭推送 |
 | App→ | `{"t":"foreground","on":true}` | App 在前台时，桥接服务不给这台设备发推送 |
+| App→ | `{"t":"forms","ids":["1234567890"]}` | 桌面上放着的“码上”卡片（每次连上都发全量；空数组表示都移除了），见 §6b |
 | App→ | `{"t":"push_test"}` | 立即发一条测试推送 |
 | ←桥 | `{"t":"push_result","re":"push_test"\|"push_token","ok":true,"detail":"…"}` | `re` 指明是哪条请求的结果 |
 | ←桥 | `{"t":"hc_closed","code":0}` | `hc connect` 退出了；App 应重连 |
@@ -129,6 +130,19 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
   - JWT：header `{"kid":key_id,"typ":"JWT","alg":"PS256"}`，payload `{"iss":sub_account,"aud":"https://oauth-login.cloud.huawei.com/oauth2/v3/token","iat":…,"exp":iat+3600}`，用 `private_key` 做 SHA256withRSA/PSS 签名。
   - body：`payload.notification{category,title,body,clickAction{actionType:0,data{terminal}},notifyId}`，`target.token[]`，`pushOptions{testMessage,ttl}`。
   - `category` 默认 `MARKETING`；申请到自分类权益后在 `config.json` 里改。`testMessage` 默认 true（调试阶段）。
+
+## 6b. 桌面卡片（D34）
+
+华为推送的通知不能带按钮（V3 `notification` 只有 `clickAction`），所以在桌面放一张 2×4 卡片“等你处理”：显示在等你的 Agent 数、最新那个的问题和最多 3 个选项按钮（不含“自己输入”类）。
+
+- 卡片的值（全是字符串）：`n` `head` `q` `o1..o3` `i1..i3` `addr` `note`，桥接服务（`bridge/src/card.rs`）和 App（`ets/core/Cards.ets`）生成同样的值；按钮名把常见回答缩短（Yes→允许，Yes, and don't ask again→允许，不再问，No→拒绝）。
+- 谁来刷新：
+  - App 在前台时自己刷（`formProvider.updateForm`，不占额度），退到后台的那一刻再刷一次。
+  - App 不在前台时，桥接服务在“等你的 Agent 列表”变化后约 1.2 秒，用自己的 `hc connect` 调 `terminal.read` 读最新那个的屏幕、解析问题（读不出来隔 0.6/1.5 秒再试），然后发卡片刷新消息：`push-type: 1`，body `payload{moduleName:"entry",abilityName:"EntryFormAbility",formName:"widget",formId,version,formData}`，`target.token[1]`。`version` 用 2025 年起的 0.1 秒数（必须递增且不超过 2^31-1）。
+  - 同样的值不重发；每张卡每天最多 45 次（华为对工具/效率类每卡每天 50 次），用完当天不再发，只记日志。
+- 卡片在独立进程（`EntryFormAbility`）里只做两件事：记下卡片 id（preferences `cards`），给新卡一个初值（上次的值），并把 11 个键登记为推送代理键（`dataProxyEnabled`）。
+- 点按钮：`postCardAction` 的 `call` 在后台拉起 `EntryAbility`（需要 `KEEP_BACKGROUND_RUNNING`），callee `answer` 收到 `{formId,addr,opt,label}` 后：连 Mac（最多等 10 秒，以“后台”身份，桥接服务照常推送）→ 重新读屏幕 → 选项还在且名字没变才按键回答（和回答卡片同一套按键）→ 卡片上写“已选「…」”。问题变了就写“问题已经变了，点开看看”，不回答。
+- 点卡片其他地方：`router` 打开 App 并进入那个终端（参数在 `want.parameters.params` 的 JSON 里）。
 
 ## 7. 鸿蒙端要点
 

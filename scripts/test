@@ -41,6 +41,7 @@ step "static: shell syntax"
 rc=0
 for f in "$HUP_ROOT"/scripts/* "$HUP_ROOT"/scripts/lib/*.sh; do
   [[ -f $f ]] || continue
+  [[ $f == *.sh ]] || head -1 "$f" | grep -q bash || continue  # e.g. make-phone-icon is Python
   bash -n "$f" || rc=1
 done
 result $rc "bash -n scripts/*"

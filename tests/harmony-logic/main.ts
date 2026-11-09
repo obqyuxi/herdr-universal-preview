@@ -6,7 +6,8 @@ import { b64urlDecode, b64urlEncode, equal, utf8, fromUtf8 } from './Bytes.ts';
 import { clientKeys, x25519Private, XKey, Records } from './Crypto.ts';
 import { parsePairLink } from './Link.ts';
 import { Session, Conn } from './Session.ts';
-import { Group } from './Agents.ts';
+import { Agent, Group } from './Agents.ts';
+import { cardValues } from './Cards.ts';
 import { parsePrompt, keysFor } from './Prompt.ts';
 
 let fail = 0;
@@ -62,6 +63,13 @@ const inl = parsePrompt('第 1 轮完成\n要继续下一轮吗？ 1) 继续  2)
 check('inline options on one line', inl.options.length === 2 && inl.options[1].label === '停下' && inl.question === '要继续下一轮吗？', JSON.stringify(inl));
 check('no highlight: type the number', JSON.stringify(keysFor(parsePrompt('要继续吗？ 1) 继续  2) 停下  > '), 2)) === '["2","enter"]');
 check('plain output has no prompt', parsePrompt('just some\noutput 1. not a menu\n').kind === 'none');
+
+// 1c. The home-screen card's values (same keys and labels as bridge/src/card.rs).
+const waits = Agent.from({ address: 't1', cwd: '/Users/a/proj', status: { state: 'blocked', app: 'claude', kind: 'permission' } });
+waits.prompt = perm;
+const cv = cardValues([waits, Agent.from({ address: 't2', status: { state: 'working', app: 'codex' } })]);
+check('card: one waiting, its choices as short labels', cv['n'] === '1' && cv['head'] === 'claude · proj' && cv['o1'] === '允许' && cv['o2'] === '允许，不再问' && cv['o3'] === '' && cv['i2'] === '2', JSON.stringify(cv));
+check('card: nothing waiting', cardValues([])['note'] === '没有在等你的任务');
 
 // 2. The session against the live bridge.
 const s = Session.shared;

@@ -31,8 +31,25 @@
         ]
       }
     ],
+    "extensionAbilities": [
+      {
+        // The home-screen card (ets/widget); Push Kit card messages refresh it.
+        "name": "EntryFormAbility",
+        "srcEntry": "./ets/entryformability/EntryFormAbility.ets",
+        "label": "$string:EntryFormAbility_label",
+        "description": "$string:EntryFormAbility_desc",
+        "type": "form",
+        "metadata": [{ "name": "ohos.extension.form", "resource": "$profile:form_config" }]
+      }
+    ],
     "requestPermissions": [
-      { "name": "ohos.permission.INTERNET" }
+      { "name": "ohos.permission.INTERNET" },
+      // A card button starts EntryAbility in the background ("call") to send the answer.
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+        "reason": "$string:keep_running_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      }
     ]
   }
 }

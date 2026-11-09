@@ -8,6 +8,7 @@ import { HcClient, HelloResult, LineSplitter, RESIZE, StreamSink } from './Hc';
 import { Agent, AgentStore, EventLine, SubscribeResult } from './Agents';
 import { PairLink, wsUrl } from './Link';
 import { keysFor, parsePrompt, PromptInfo } from './Prompt';
+import { cardValues, Cards } from './Cards';
 import { util } from '@kit.ArkTS';
 import { forgetMachine, loadMachine, MachineData, saveMachine } from './Vault';
 
@@ -193,6 +194,8 @@ export interface AttachResult {
   channel?: number;
 }
 
+const SUPERSEDED = 'superseded';
+
 export class Session {
   static readonly shared: Session = new Session();
 
@@ -221,6 +224,11 @@ export class Session {
   private retryDelay: number = 2000;
   /// One dial at a time (foreground, retry timer and the page can all ask at once).
   private dialing: boolean = false;
+  /// Pairing with a new Mac: the saved one must not reconnect meanwhile (a pairing link
+  /// can start the app, which also reconnects on launch).
+  private pairing: boolean = false;
+  /// Only the newest dial may become the session.
+  private dialGen: number = 0;
   private listeners: Array<() => void> = [];
 
   subscribe(fn: () => void): void {
@@ -240,6 +248,13 @@ export class Session {
     for (const f of this.listeners) {
       f();
     }
+    if (this.conn === Conn.Ready) {
+      Cards.soon(() => this.agents.list());
+    }
+  }
+
+  isForeground(): boolean {
+    return this.foreground;
   }
 
   async start(): Promise<void> {
@@ -255,6 +270,15 @@ export class Session {
 
   /// Pair with a scanned or pasted link, save the credentials, stay connected.
   async pair(link: PairLink): Promise<void> {
+    this.pairing = true;
+    try {
+      await this.pairOnce(link);
+    } finally {
+      this.pairing = false;
+    }
+  }
+
+  private async pairOnce(link: PairLink): Promise<void> {
     const first: ControlMsg = { t: 'pair', code: link.code, device: deviceInfo.marketName || deviceInfo.productModel || 'HarmonyOS' };
     const reply = await this.dial(link.hosts, link.port, link.key, first);
     if (reply.t !== 'paired' || !reply.device_id || !reply.token) {
@@ -275,7 +299,7 @@ export class Session {
 
   async connect(): Promise<void> {
     const m = this.machine;
-    if (m === null || this.dialing) {
+    if (m === null || this.dialing || this.pairing) {
       return;
     }
     this.dialing = true;
@@ -294,6 +318,9 @@ export class Session {
       await this.afterAuth();
     } catch (e) {
       const msg = (e as Error).message;
+      if (msg === SUPERSEDED) {
+        return;
+      }
       if (msg === 'unauthorized') {
         this.error = '这台手机已在 Mac 上被移除，请重新配对';
         this.conn = Conn.Failed;
@@ -317,6 +344,7 @@ export class Session {
     if (hosts.length === 0) {
       throw new Error('没有可用地址');
     }
+    const gen = ++this.dialGen;
     return new Promise<ControlMsg>((resolve, reject) => {
       let pending = hosts.length;
       let won = false;
@@ -329,6 +357,11 @@ export class Session {
             return;
           }
           won = true;
+          if (gen !== this.dialGen) {
+            sock.close();
+            reject(new Error(SUPERSEDED));
+            return;
+          }
           this.sock = sock;
           this.host = host;
           const m = this.machine;
@@ -394,7 +427,15 @@ export class Session {
     if (this.pushToken) {
       sock.sendControl({ t: 'push_token', token: this.pushToken });
     }
+    this.sendForms();
     this.changed();
+  }
+
+  /// Tell the bridge which home-screen cards to refresh while the app is away.
+  sendForms(): void {
+    if (this.sock !== null && this.conn === Conn.Ready) {
+      this.sock.sendControl({ t: 'forms', ids: Cards.ids() });
+    }
   }
 
   private onControl(m: ControlMsg): void {
@@ -460,6 +501,12 @@ export class Session {
   /// Background: the system suspends the app soon anyway; the bridge pushes meanwhile.
   setForeground(on: boolean): void {
     this.foreground = on;
+    if (!on && this.conn === Conn.Ready) {
+      // Leave the cards current: the bridge takes over from here.
+      Cards.show(cardValues(this.agents.list()));
+    } else if (on) {
+      this.sendForms();
+    }
     if (this.sock !== null) {
       this.sock.sendControl({ t: 'foreground', on: on });
     }
@@ -662,6 +709,33 @@ export class Session {
         setTimeout(() => this.refreshPrompt(address, n + 1), n === 0 ? 600 : 1500);
       }
     }).catch((): void => {});
+  }
+
+  /// Read a blocked agent's question now (a card button checks it is still the same).
+  async readPrompt(address: string): Promise<PromptInfo | null> {
+    const r = (await this.client().call('terminal.read', new ReadParams(address, 0))) as ReadResult;
+    const p = parsePrompt(r.text ?? '');
+    const a = this.agents.get(address);
+    if (a !== undefined) {
+      a.prompt = p.kind === 'none' ? null : p;
+      a.promptFor = a.statusMs;
+    }
+    return p.kind === 'none' ? null : p;
+  }
+
+  /// Wait until connected (a card button starts the app in the background).
+  async ready(timeoutMs: number): Promise<void> {
+    await this.start();
+    const until = Date.now() + timeoutMs;
+    while (this.conn !== Conn.Ready) {
+      if (Date.now() > until || this.conn === Conn.Failed && this.error === '这台手机已在 Mac 上被移除，请重新配对') {
+        throw new Error(this.error || '连不上 Mac');
+      }
+      if (this.conn !== Conn.Connecting) {
+        this.connect();
+      }
+      await new Promise<void>((r: () => void) => setTimeout(r, 200));
+    }
   }
 
   /// Answer a blocked agent's question: move to the option and press enter.

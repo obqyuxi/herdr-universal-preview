@@ -1,7 +1,36 @@
 {
   "string": [
-    { "name": "module_desc", "value": "码上: remote client for DD-up on the Mac" },
-    { "name": "EntryAbility_desc", "value": "Agents on your Mac" },
-    { "name": "EntryAbility_label", "value": "码上" }
+    {
+      "name": "module_desc",
+      "value": "码上: remote client for DD-up on the Mac"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Agents on your Mac"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "码上"
+    },
+    {
+      "name": "widget_display_name",
+      "value": "等你处理"
+    },
+    {
+      "name": "widget_desc",
+      "value": "在等你回答的 Agent，直接点按钮回答"
+    },
+    {
+      "name": "EntryFormAbility_label",
+      "value": "码上卡片"
+    },
+    {
+      "name": "EntryFormAbility_desc",
+      "value": "Home-screen card for agents waiting on you"
+    },
+    {
+      "name": "keep_running_reason",
+      "value": "在卡片上点回答时，在后台把回答发给 Mac"
+    }
   ]
 }

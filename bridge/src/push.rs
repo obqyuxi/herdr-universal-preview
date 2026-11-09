@@ -107,11 +107,36 @@ impl Pusher {
         if tokens.is_empty() {
             bail!("no device has registered for push");
         }
+        self.post("0", Self::body(cfg, tokens, alert))
+    }
+
+    /// A card-refresh message (push-type 1) for one home-screen card. `version` must grow.
+    pub fn form_body(cfg: &PushConfig, token: &str, form_id: &str, version: u64, data: &Value) -> Value {
+        let id = form_id.parse::<i64>().map_or_else(|_| json!(form_id), |n| json!(n));
+        json!({
+            "payload": {
+                "moduleName": "entry",
+                "abilityName": "EntryFormAbility",
+                "formName": "widget",
+                "formId": id,
+                "version": version,
+                "formData": data,
+            },
+            "target": {"token": [token]},
+            "pushOptions": {"testMessage": cfg.test_message},
+        })
+    }
+
+    pub fn send_form(&self, cfg: &PushConfig, token: &str, form_id: &str, version: u64, data: &Value) -> Result<String> {
+        self.post("1", Self::form_body(cfg, token, form_id, version, data))
+    }
+
+    fn post(&self, push_type: &str, body: Value) -> Result<String> {
         let resp = ureq::post(&self.endpoint)
             .timeout(Duration::from_secs(15))
             .set("Authorization", &format!("Bearer {}", self.jwt()))
-            .set("push-type", "0")
-            .send_json(Self::body(cfg, tokens, alert));
+            .set("push-type", push_type)
+            .send_json(body);
         let (status, text) = match resp {
             Ok(r) => (r.status(), r.into_string().unwrap_or_default()),
             Err(ureq::Error::Status(code, r)) => (code, r.into_string().unwrap_or_default()),
@@ -137,6 +162,11 @@ fn normalize_pem(pem: &str) -> String {
         .collect();
     let lines: Vec<&str> = body.as_bytes().chunks(64).map(|c| std::str::from_utf8(c).unwrap_or_default()).collect();
     format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", lines.join("\n"))
+}
+
+/// Card messages need a growing `version` that fits in an i32: tenths of a second since 2025.
+pub fn form_version(now_ms: u64) -> u64 {
+    now_ms.saturating_sub(1_735_689_600_000) / 100
 }
 
 /// A stable notify id per terminal, so a newer alert replaces the older one.
@@ -224,6 +254,18 @@ mod tests {
         assert_eq!(b["payload"]["notification"]["clickAction"]["actionType"], 0);
         assert_eq!(b["target"]["token"][0], "tok");
         assert_eq!(b["pushOptions"]["testMessage"], true);
+    }
+
+    #[test]
+    fn card_body_matches_the_form_refresh_shape() {
+        let b = Pusher::form_body(&PushConfig::default(), "tok", "4234342620", 17, &json!({"n": "1"}));
+        assert_eq!(b["payload"]["formId"], 4234342620i64);
+        assert_eq!(b["payload"]["formName"], "widget");
+        assert_eq!(b["payload"]["abilityName"], "EntryFormAbility");
+        assert_eq!(b["payload"]["formData"]["n"], "1");
+        assert_eq!(b["target"]["token"][0], "tok");
+        let v = form_version(1_794_200_000_000);
+        assert!(v > 0 && v < i32::MAX as u64 && form_version(1_794_200_000_100) == v + 1);
     }
 
     #[test]

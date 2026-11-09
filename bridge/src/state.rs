@@ -55,6 +55,9 @@ pub struct Device {
     pub last_seen_ms: Option<u64>,
     #[serde(default)]
     pub push_token: Option<String>,
+    /// Home-screen cards the app has placed (Push Kit form ids), refreshed by card messages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forms: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -230,6 +233,7 @@ impl Store {
             created_ms: now_ms(),
             last_seen_ms: Some(now_ms()),
             push_token: None,
+            forms: Vec::new(),
         };
         let mut all = self.devices().map_err(PairError::Io)?;
         all.devices.push(device.clone());
@@ -252,6 +256,15 @@ impl Store {
         let mut all = self.devices()?;
         match all.devices.iter_mut().find(|d| d.id == id) {
             Some(d) => d.push_token = token.filter(|t| !t.is_empty()),
+            None => bail!("device {id} was revoked"),
+        }
+        self.save_devices(&all)
+    }
+
+    pub fn set_forms(&self, id: &str, forms: Vec<String>) -> Result<()> {
+        let mut all = self.devices()?;
+        match all.devices.iter_mut().find(|d| d.id == id) {
+            Some(d) => d.forms = forms.into_iter().filter(|f| !f.is_empty() && f.len() <= 32).take(8).collect(),
             None => bail!("device {id} was revoked"),
         }
         self.save_devices(&all)

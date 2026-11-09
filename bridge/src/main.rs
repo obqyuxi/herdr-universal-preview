@@ -1,6 +1,7 @@
 //! ddup-bridge: lets the HarmonyOS app (码上) reach herdr-core on this Mac (D27).
 //! Design and wire protocol: docs/harmony/DESIGN.md.
 
+mod card;
 mod crypto;
 mod ports;
 mod push;
@@ -74,6 +75,8 @@ enum Cmd {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Fill every placed home-screen card with a sample question (checks the card-refresh path)
+    CardTest,
     /// Show the state directory, config and push readiness
     Status,
     /// Print a fresh Push Kit JWT (1 hour) for diagnosing the service account; pipe it, don't log it
@@ -160,6 +163,16 @@ fn main() -> Result<()> {
                 None => ctx.push(&alert)?,
             };
             println!("{sent}");
+            Ok(())
+        }
+        Cmd::CardTest => {
+            let ctx = server::Ctx::new(store)?;
+            let waiting = [card::Waiting { address: "test".into(), label: "claude · 码上".into(), message: "要你批准权限".into() }];
+            let prompt =
+                card::parse("Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again\n  3. No, and tell Claude what to do differently (esc)\n");
+            let mut data = card::data(&waiting, prompt.as_ref());
+            data["note"] = serde_json::json!(format!("测试 {}", state::now_ms() / 1000 % 10000));
+            ctx.refresh_cards(&data);
             Ok(())
         }
         Cmd::PushJwt => {

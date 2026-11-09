@@ -1,7 +1,8 @@
 //! `ddup-bridge serve`: accept the phone, run the DDB1 handshake, check its
 //! device, then relay `hc connect` both ways (docs/harmony/DESIGN.md §3–4).
-//! Also runs the push watcher.
+//! Also runs the push watcher and keeps the home-screen card current.
 
+use crate::card::{self, Budget, Waiting};
 use crate::crypto::{self, Half, Records};
 use crate::ports::Forwards;
 use crate::push::{self, Pusher};
@@ -19,7 +20,7 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch as latest};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use x25519_dalek::StaticSecret;
@@ -44,6 +45,8 @@ pub struct Ctx {
     files: Mutex<()>,
     next_conn: AtomicU64,
     forwards: Arc<Forwards>,
+    /// Per card: what it was last sent, and today's refresh budget.
+    cards: Mutex<HashMap<String, (Option<Value>, Budget)>>,
 }
 
 impl Ctx {
@@ -60,6 +63,7 @@ impl Ctx {
             files: Mutex::default(),
             next_conn: AtomicU64::new(1),
             forwards: Arc::default(),
+            cards: Mutex::default(),
         })
     }
 
@@ -90,6 +94,44 @@ impl Ctx {
             bail!("the app is open on every registered phone (no push while it's in front)");
         }
         self.push_to(&tokens, alert)
+    }
+
+    /// Bring every placed card up to date: skips phones that are looking (the app updates
+    /// its cards itself then), cards already showing this, and cards out of today's budget.
+    pub fn refresh_cards(&self, data: &Value) {
+        let (Some(p), true) = (&self.pusher, self.config.push.enabled) else { return };
+        let Ok(devices) = self.store.devices() else { return };
+        for d in &devices.devices {
+            let Some(token) = &d.push_token else { continue };
+            let looking = self.is_foreground(&d.id);
+            for form in &d.forms {
+                let send = {
+                    let mut cards = self.cards.lock().unwrap();
+                    let (last, budget) = cards.entry(form.clone()).or_default();
+                    if looking {
+                        *last = None;
+                        false
+                    } else if last.as_ref() == Some(data) {
+                        false
+                    } else if !budget.take(crate::state::now_ms()) {
+                        log(format!("card {form}: today's refresh budget is used up"));
+                        false
+                    } else {
+                        *last = Some(data.clone());
+                        true
+                    }
+                };
+                if send {
+                    match p.send_form(&self.config.push, token, form, push::form_version(crate::state::now_ms()), data) {
+                        Ok(m) => log(format!("card {form} ({} waiting): {m}", data["n"].as_str().unwrap_or("?"))),
+                        Err(e) => {
+                            self.cards.lock().unwrap().entry(form.clone()).or_default().0 = None;
+                            log(format!("card {form} not refreshed: {e:#}"));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn push_to(&self, tokens: &[String], alert: &Alert) -> Result<String> {
@@ -134,7 +176,9 @@ pub async fn serve(ctx: Arc<Ctx>) -> Result<()> {
         ctx.config.session.as_ref().map(|s| format!(" --session {s}")).unwrap_or_default(),
         if ctx.pusher.is_some() { "ready" } else { "no key" }
     ));
-    tokio::spawn(watch(ctx.clone()));
+    let (waiting, waiting_rx) = latest::channel(Vec::new());
+    tokio::spawn(watch(ctx.clone(), waiting));
+    tokio::spawn(cards(ctx.clone(), waiting_rx));
     loop {
         let (stream, peer) = listener.accept().await?;
         if !ctx.config.allow_public && !is_near(peer.ip()) {
@@ -379,6 +423,14 @@ async fn on_control(ctx: &Arc<Ctx>, conn: u64, device: &str, v: &Value) -> Optio
             }
             None
         }
+        "forms" => {
+            let forms: Vec<String> = v["ids"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_owned)).collect();
+            let _g = ctx.files.lock().unwrap();
+            if let Err(e) = ctx.store.set_forms(device, forms) {
+                log(format!("forms: {e:#}"));
+            }
+            None
+        }
         "push_token" => {
             let token = v["token"].as_str().map(str::to_owned);
             let r = {
@@ -451,10 +503,10 @@ async fn on_control(ctx: &Arc<Ctx>, conn: u64, device: &str, v: &Value) -> Optio
 }
 
 /// Follow the core's events and push alerts; reconnects when hc goes away.
-async fn watch(ctx: Arc<Ctx>) {
+async fn watch(ctx: Arc<Ctx>, waiting: latest::Sender<Vec<Waiting>>) {
     let mut wait = Duration::from_secs(1);
     loop {
-        match watch_once(&ctx).await {
+        match watch_once(&ctx, &waiting).await {
             Ok(()) => wait = Duration::from_secs(1),
             Err(e) => log(format!("watcher: {e:#}")),
         }
@@ -463,7 +515,75 @@ async fn watch(ctx: Arc<Ctx>) {
     }
 }
 
-async fn watch_once(ctx: &Arc<Ctx>) -> Result<()> {
+/// Hand the card task the current waiting list when it changed.
+fn note_waiting(tracker: &Tracker, waiting: &latest::Sender<Vec<Waiting>>) {
+    let now = tracker.waiting();
+    waiting.send_if_modified(|cur| {
+        let changed = *cur != now;
+        if changed {
+            *cur = now.clone();
+        }
+        changed
+    });
+}
+
+/// Keeps the home-screen cards current: after the waiting list settles, read what the
+/// newest waiting agent asks and send the cards that.
+async fn cards(ctx: Arc<Ctx>, mut waiting: latest::Receiver<Vec<Waiting>>) {
+    while waiting.changed().await.is_ok() {
+        // An agent says "blocked" a moment before it has drawn its question.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let now = waiting.borrow_and_update().clone();
+        let mut head = None;
+        if let Some(w) = now.first() {
+            for attempt in 0..3 {
+                match read_screen(&ctx, &w.address).await {
+                    Ok(text) => head = card::parse(&text),
+                    Err(e) => log(format!("card: read {}: {e:#}", w.address)),
+                }
+                if head.is_some() || waiting.has_changed().unwrap_or(true) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(if attempt == 0 { 600 } else { 1500 })).await;
+            }
+        }
+        if waiting.has_changed().unwrap_or(false) {
+            continue;
+        }
+        let data = card::data(&now, head.as_ref());
+        let ctx = ctx.clone();
+        let _ = tokio::task::spawn_blocking(move || ctx.refresh_cards(&data)).await;
+    }
+}
+
+/// One `terminal.read` through its own `hc connect`.
+async fn read_screen(ctx: &Arc<Ctx>, address: &str) -> Result<String> {
+    let mut child = ctx.hc_command().spawn().with_context(|| format!("run {} connect", ctx.config.hc_path().display()))?;
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let req = json!({"jsonrpc": "2.0", "id": 1, "method": "terminal.read", "params": {"terminal": address, "lines": 0}});
+    stdin.write_all(format!("{req}\n").as_bytes()).await?;
+    let reply = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(line) = lines.next_line().await? {
+            if let Ok(v) = serde_json::from_str::<Value>(&line)
+                && v["id"] == 1
+            {
+                return Ok(v);
+            }
+        }
+        Err(anyhow!("hc closed before answering"))
+    })
+    .await
+    .map_err(|_| anyhow!("terminal.read timed out"))??;
+    drop(stdin);
+    let _ = child.kill().await;
+    if let Some(err) = reply.get("error") {
+        bail!("terminal.read: {err}");
+    }
+    Ok(reply["result"]["text"].as_str().unwrap_or_default().to_owned())
+}
+
+async fn watch_once(ctx: &Arc<Ctx>, waiting: &latest::Sender<Vec<Waiting>>) -> Result<()> {
     let mut child = ctx.hc_command().spawn().with_context(|| format!("run {} connect", ctx.config.hc_path().display()))?;
     let mut stdin = child.stdin.take().unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
@@ -478,12 +598,15 @@ async fn watch_once(ctx: &Arc<Ctx>) -> Result<()> {
                     bail!("events.subscribe failed: {err}");
                 }
                 tracker.snapshot(v["result"]["seq"].as_u64().unwrap_or(0), &v["result"]["terminals"]);
+                note_waiting(&tracker, waiting);
                 subscribed = true;
                 log(format!("watcher: following {} terminal(s)", v["result"]["terminals"].as_array().map_or(0, Vec::len)));
             }
             continue;
         }
-        for alert in tracker.line(&v) {
+        let alerts = tracker.line(&v);
+        note_waiting(&tracker, waiting);
+        for alert in alerts {
             let wanted = match alert.why {
                 crate::watch::Why::NeedsYou => ctx.config.push.notify_blocked,
                 crate::watch::Why::Done => ctx.config.push.notify_done,

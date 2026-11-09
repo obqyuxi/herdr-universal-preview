@@ -2,6 +2,7 @@
 //! (docs/harmony/DESIGN.md §6): it went blocked/error, or finished a turn
 //! nobody has seen (`herdr.seen`, docs/labels.md).
 
+use crate::card::Waiting;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -28,6 +29,8 @@ struct Term {
     reported: bool,
     name: String,
     cwd: String,
+    /// The event seq at which it started waiting for you (newest first on the card).
+    since: u64,
 }
 
 impl Term {
@@ -65,6 +68,16 @@ impl Term {
             (None, false) => format!("{address} · {folder}"),
             (None, true) => address.to_owned(),
         }
+    }
+
+    fn needs_you_message(&self) -> String {
+        let kind = self.status["kind"].as_str().map(|k| match k {
+            "permission" => "要你批准权限".to_owned(),
+            "question" => "在问你问题".to_owned(),
+            "auth" => "要你登录".to_owned(),
+            other => other.to_owned(),
+        });
+        self.message().or(kind).unwrap_or_else(|| if self.state.as_deref() == Some("error") { "出错了".into() } else { "在等你".into() })
     }
 
     fn message(&self) -> Option<String> {
@@ -106,7 +119,15 @@ impl Tracker {
         }
     }
 
+    /// Agents waiting for you, the one that started waiting last first.
+    pub fn waiting(&self) -> Vec<Waiting> {
+        let mut w: Vec<(&String, &Term)> = self.terms.iter().filter(|(_, t)| t.needs_you()).collect();
+        w.sort_by(|a, b| b.1.since.cmp(&a.1.since).then_with(|| a.0.cmp(b.0)));
+        w.into_iter().map(|(a, t)| Waiting { address: a.clone(), label: t.label(a), message: t.needs_you_message() }).collect()
+    }
+
     fn event(&mut self, p: &Value) -> Option<Alert> {
+        let seq = self.seq;
         let kind = p["type"].as_str()?;
         let address = p["terminal"].as_str()?.to_owned();
         let data = &p["data"];
@@ -142,14 +163,10 @@ impl Tracker {
                 let was = t.needs_you();
                 t.set_status(&data["status"]);
                 (!was && t.needs_you()).then(|| {
-                    let kind = t.status["kind"].as_str().map(|k| match k {
-                        "permission" => "要你批准权限".to_owned(),
-                        "question" => "在问你问题".to_owned(),
-                        "auth" => "要你登录".to_owned(),
-                        other => other.to_owned(),
-                    });
-                    let body = t.message().or(kind).unwrap_or_else(|| if t.state.as_deref() == Some("error") { "出错了".into() } else { "在等你".into() });
-                    Alert { terminal: address.clone(), why: Why::NeedsYou, title: format!("需要你处理 · {}", t.label(&address)), body }
+                    t.since = seq;
+                    Alert {
+                        terminal: address.clone(), why: Why::NeedsYou, title: format!("需要你处理 · {}", t.label(&address)), body: t.needs_you_message()
+                    }
                 })
             }
             "turn" => {
@@ -200,6 +217,18 @@ mod tests {
         assert_eq!(a[0].title, "需要你处理 · claude · proj");
         assert_eq!(a[0].body, "要你批准权限");
         assert!(tr.line(&ev(12, "status", "t1", json!({"status": {"state": "blocked", "msg": "still"}}))).is_empty());
+    }
+
+    #[test]
+    fn waiting_lists_the_newest_first_and_drops_answered_ones() {
+        let mut tr = tracker();
+        tr.line(&ev(11, "status", "t1", json!({"status": {"state": "blocked", "kind": "permission", "app": "claude"}})));
+        tr.line(&ev(12, "status", "t2", json!({"status": {"state": "blocked", "msg": "继续吗", "app": "codex"}})));
+        let w = tr.waiting();
+        assert_eq!(w.iter().map(|w| w.address.as_str()).collect::<Vec<_>>(), ["t2", "t1"]);
+        assert_eq!((w[0].label.as_str(), w[0].message.as_str()), ("codex · tmp", "继续吗"));
+        tr.line(&ev(13, "status", "t2", json!({"status": {"state": "working", "app": "codex"}})));
+        assert_eq!(tr.waiting().len(), 1);
     }
 
     #[test]

@@ -1,15 +1,91 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { rpc } from '@kit.IPCKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { pushService } from '@kit.PushKit';
 import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import { Session } from '../core/Session';
+import { Cards, shortLabel } from '../core/Cards';
+import { PromptOption } from '../core/Prompt';
 
 const DOMAIN = 0xd0d0;
 
+/// What a card button sends (ets/widget/pages/WidgetCard.ets).
+interface CardAnswer {
+  formId?: string;
+  addr?: string;
+  opt?: string;
+  label?: string;
+}
+
+/// The callee has to hand something back; the card ignores it.
+class Nothing implements rpc.Parcelable {
+  marshalling(out: rpc.MessageSequence): boolean {
+    return true;
+  }
+
+  unmarshalling(src: rpc.MessageSequence): boolean {
+    return true;
+  }
+}
+
+/// A card button: connect (the app may only be running in the background for this),
+/// check the agent still asks the same, answer, and show how it went on the card.
+async function answerFromCard(c: CardAnswer, shown: boolean): Promise<void> {
+  const id = c.formId ?? '';
+  const say = (note: string, clear: boolean): void => {
+    if (!id) {
+      return;
+    }
+    const v: Record<string, string> = { 'note': note };
+    if (clear) {
+      v['o1'] = '';
+      v['o2'] = '';
+      v['o3'] = '';
+    }
+    Cards.patch(id, v);
+  };
+  const address = c.addr ?? '';
+  const opt = Number.parseInt(c.opt ?? '');
+  if (!address || !(opt > 0)) {
+    return;
+  }
+  say(`正在发送「${c.label ?? opt}」…`, false);
+  const s = Session.shared;
+  if (!shown) {
+    // Not on screen: the bridge keeps pushing while this connection is open.
+    s.setForeground(false);
+  }
+  try {
+    await s.ready(10000);
+    const p = await s.readPrompt(address);
+    const o = p?.options.find((x: PromptOption) => x.index === opt);
+    if (p === null || o === undefined || (c.label && shortLabel(o.label) !== c.label)) {
+      say('问题已经变了，点开看看', true);
+      return;
+    }
+    await s.answer(address, opt);
+    say(`已选「${shortLabel(o.label)}」`, true);
+  } catch (e) {
+    say(`没发出去：${(e as Error).message}`, false);
+  }
+}
+
 export default class EntryAbility extends UIAbility {
+  /// The window is on screen (a card button can start the ability without one).
+  private shown: boolean = false;
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    Cards.init(this.context);
+    this.callee.on('answer', (data: rpc.MessageSequence): rpc.Parcelable => {
+      try {
+        answerFromCard(JSON.parse(data.readString()) as CardAnswer, this.shown);
+      } catch (e) {
+        hilog.warn(DOMAIN, 'ddup', 'card answer: %{public}s', (e as Error).message);
+      }
+      return new Nothing();
+    });
     this.takeWant(want);
     // Push Kit hands back a token once the app is set up in AppGallery Connect (client_id in module.json5).
     pushService.getToken().then((token: string) => {
@@ -34,7 +110,16 @@ export default class EntryAbility extends UIAbility {
     if (params === undefined) {
       return;
     }
-    const t = params['terminal'];
+    let t: Object | undefined = params['terminal'];
+    // A tapped card: its router params arrive as a JSON string.
+    const card: Object | undefined = params['params'];
+    if (t === undefined && typeof card === 'string') {
+      try {
+        t = (JSON.parse(card) as Record<string, string>)['terminal'];
+      } catch (e) {
+        t = '';
+      }
+    }
     if (typeof t === 'string' && t.length > 0 && t !== 'test') {
       Session.shared.pendingOpen = t;
       Session.shared.poke();
@@ -57,10 +142,16 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    this.shown = true;
     Session.shared.setForeground(true);
   }
 
   onBackground(): void {
+    this.shown = false;
     Session.shared.setForeground(false);
+  }
+
+  onDestroy(): void {
+    this.callee.off('answer');
   }
 }

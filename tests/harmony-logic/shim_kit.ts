@@ -178,3 +178,17 @@ export const hilog = {
   warn: (_d: number, _t: string, fmt: string, ...a: unknown[]) => console.error('[hilog]', fmt, ...a),
   info: () => {},
 };
+
+// ---------- @kit.FormKit / @kit.ArkData / @kit.AbilityKit (home-screen cards) ----------
+export const formBindingData = { createFormBindingData: (o: object) => ({ data: o }) };
+export const formProvider = { updateForm: async (id: string, b: object) => {} };
+const prefs = new Map<string, unknown>();
+export const preferences = {
+  removePreferencesFromCacheSync: (...a: unknown[]) => {},
+  getPreferencesSync: (...a: unknown[]) => ({
+    getSync: (k: string, d: unknown) => (prefs.has(k) ? prefs.get(k) : d),
+    putSync: (k: string, v: unknown) => { prefs.set(k, v); },
+    flushSync: () => {},
+  }),
+};
+export const common = {};

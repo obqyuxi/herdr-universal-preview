@@ -38,6 +38,8 @@ export interface ControlMsg {
   t: string;
   /// Matches a request to its reply (transcript, ports, forward).
   id?: number;
+  /// Home-screen card ids (forms).
+  ids?: string[];
   error?: string;
   app?: string;
   cwd?: string;
