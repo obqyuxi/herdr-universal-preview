@@ -413,5 +413,8 @@
   - 用只带 `100.x.y.z` 和局域网地址的链接配对成功，设备 （新设备）（吊销了上一台 （上一台））。强制停止 App 再打开，仍然经 `mac-ddup` 连上，首页“已连接”。
   - 停掉 `dev.ddup.tailscaled` 80 秒：桥接服务约 1 分钟后推送“Mac 的 Tailscale 断了”，华为返回 Success。恢复后日志记录“Tailscale is up again”。
   - `ddup-bridge status` 的 addresses：`192.168.1.20, 100.x.y.z`。
+- 切网络实测（真机，App 在前台，Claude 用控制中心开关 WLAN）：
+  - 经 Tailscale 连着时，5G→Wi-Fi、Wi-Fi→5G：都不断线（Tailscale 自己切换底层网络），列表持续更新。
+  - 经家里 Wi-Fi 直连时关掉 Wi-Fi：8 秒后经 Tailscale 重新连上；桥接服务在 60 秒空闲上限时丢掉了那条死掉的 Wi-Fi 连接（日志“nothing from the phone for 60 s”）。D35 里“网络变化回调触发的重连”这一项由此补测。
 - 已知：`tailscaled` 的出站流量（控制面、中继）会经过 代理 App 的分流规则；目前能用，延迟没有测。官方 App 仍是“已停止”；登录时打开它的 LaunchAgent `dev.ddup.tailscale-open` 没有删，要不要删由用户决定。
 
