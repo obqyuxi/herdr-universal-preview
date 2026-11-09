@@ -22,3 +22,4 @@ mobile/harmony/**/*.hap
 harmonyOS/
 **/agconnect-services.json
 **/push-key.json
+mobile/harmony/entry/src/main/module.json5.orig

@@ -37,7 +37,7 @@ check('vectors: first s2c record opens', equal(keys.recv.open(b64urlDecode(v.s2c
 const raw = new Uint8Array([0xfb, 0xff, 0x00, 0x10, 0x83, 0xff, 0xfe]);
 check('base64url round trip', equal(b64urlDecode(b64urlEncode(raw)), raw) && b64urlEncode(raw) === Buffer.from(raw).toString('base64url'));
 check('utf8 round trip', fromUtf8(utf8('需要你处理 ✓')) === '需要你处理 ✓');
-check('tailnet addresses', isTailnet('100.p.q.r') && isTailnet('100.64.0.1') && !isTailnet('100.128.0.1') && !isTailnet('192.168.0.2'));
+check('tailnet addresses', isTailnet('100.100.1.2') && isTailnet('100.64.0.1') && !isTailnet('100.128.0.1') && !isTailnet('192.168.0.2'));
 check('merged hosts: winner first, old Tailscale address kept',
   JSON.stringify(mergeHosts('192.168.0.9', ['192.168.0.9', '10.0.0.3'], ['192.168.0.2', '100.64.0.5'])) === '["192.168.0.9","10.0.0.3","192.168.0.2","100.64.0.5"]');
 const recs = new Records();

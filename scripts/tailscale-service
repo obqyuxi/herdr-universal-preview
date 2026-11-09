@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # DD-up's own Tailscale node for the phone (D36): open-source tailscaled in
-# userspace mode as a LaunchAgent. It takes no VPN slot, so it runs next to
-# 代理 App (whose built-in Tailscale does not accept incoming connections,
-# and whose packet tunnel the official Tailscale app keeps displacing).
+# userspace mode as a LaunchAgent. It takes no VPN slot, so it runs next to a
+# VPN-based proxy app (whose built-in Tailscale, if any, may not accept incoming
+# connections, and whose packet tunnel the official Tailscale app can displace).
 # Incoming connections to this node's address reach this Mac's localhost, so the
 # phone dials ddup-bridge at it. No root, no brew: built with the Go on PATH.
 set -euo pipefail

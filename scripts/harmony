@@ -27,9 +27,32 @@ export PATH=$CLT/bin:$CLT/tool/node/bin:$CLT/sdk/default/openharmony/toolchains:
 APP=$HUP_ROOT/mobile/harmony
 HAP=$APP/entry/build/default/outputs/default
 
+MODULE=$APP/entry/src/main/module.json5
+PLACEHOLDER=YOUR_AGC_APP_ID
+
+# The AppGallery Connect app id (Push Kit client_id) stays out of the repo: from
+# DDUP_HARMONY_CLIENT_ID, or harmonyOS/agconnect-services.json (git-ignored).
+client_id() {
+  [[ -n ${DDUP_HARMONY_CLIENT_ID:-} ]] && { echo "$DDUP_HARMONY_CLIENT_ID"; return; }
+  local f=$HUP_ROOT/harmonyOS/agconnect-services.json
+  [[ -f $f ]] && /usr/bin/python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["client"]["app_id"])' "$f" 2>/dev/null
+}
+
 build() {
+  local id; id=$(client_id || true)
+  if [[ -n $id ]]; then
+    cp "$MODULE" "$MODULE.orig"
+    trap 'mv -f "$MODULE.orig" "$MODULE"' EXIT
+    /usr/bin/sed -i '' "s/\"$PLACEHOLDER\"/\"$id\"/" "$MODULE"
+  else
+    echo "note: no AppGallery Connect app id (harmonyOS/agconnect-services.json or DDUP_HARMONY_CLIENT_ID): push won't work" >&2
+  fi
   (cd "$APP" && ohpm install >/dev/null && hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon 2>&1 \
     | grep -E 'ERROR|Error Message|At File|BUILD|COMPILE RESULT' || true)
+  if [[ -n $id ]]; then
+    mv -f "$MODULE.orig" "$MODULE"
+    trap - EXIT
+  fi
   ls "$HAP"/*.hap 2>/dev/null || hup_die "no HAP built"
 }
 

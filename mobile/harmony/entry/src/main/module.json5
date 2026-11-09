@@ -9,7 +9,9 @@
     "installationFree": false,
     "pages": "$profile:main_pages",
     "metadata": [
-      // Push Kit: the Client ID from AppGallery Connect > Project settings > App information.
+      // Push Kit: your app's id from AppGallery Connect. Not kept in the repo: scripts/harmony
+      // fills it in while building, from harmonyOS/agconnect-services.json (client.app_id)
+      // or DDUP_HARMONY_CLIENT_ID.
       { "name": "client_id", "value": "YOUR_AGC_APP_ID" }
     ],
     "abilities": [
