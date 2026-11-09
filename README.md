@@ -5,6 +5,7 @@
 - **files-plus**: the Files panel opens PDF (PDFKit), Word/Excel/PowerPoint/Pages/Numbers/Keynote and images (Quick Look), and audio/video (AVKit) right in the panel.
 - **browser**: a side browser panel (Chromium via CEF 156; WebKit fallback) with persistent logins, find, zoom, print, downloads, history, clear data, and an opt-in import of your Chrome cookies.
 - **tabs-plus** and the `dd-up` layout: the official main layout with a "浏览器" (browser) button.
+- **码上 (HarmonyOS phone app)** with `ddup-bridge` on the Mac: see every agent's state, conversation and terminal on the phone, answer permission prompts and questions there, get a push and a home-screen card when an agent waits for you. The phone talks to your own Mac directly (LAN or Tailscale), end-to-end encrypted; no server in between.
 
 Not affiliated with the Herdr project. The host changes live in [`patches/herdr-app/`](patches/herdr-app/), so they're easy to review against upstream.
 
@@ -19,6 +20,28 @@ DD-up 是在官方 Herdr 上加了一个小扩展的个人构建：在 Herdr 主
 | Files 里直接打开文件 | PDF（多页、可选中复制）、Word/Excel/PowerPoint、Pages/Numbers/Keynote、RTF、图片（含 SVG）、MP4/MOV/M4V、MP3/WAV/M4A/AAC/AIFF。代码和文本仍然用官方的只读代码视图 |
 | 侧边浏览器 | 顶栏点"浏览器"，输入网址就能用；登录状态会保存。⋯ 菜单里有：在页面中查找、打印、缩放、下载、历史记录、导入 Chrome 登录、清除浏览数据 |
 | 不影响原有使用 | 和官方 Herdr 共用同一套工作区、终端、Agent 和设置（同一个 herdr-core） |
+
+## 手机 App：码上（鸿蒙）
+
+<img src="docs/assets/phone-demo.gif" width="260" align="right" alt="码上演示：Agent 请求权限，在手机上点允许后继续运行">
+
+在鸿蒙手机上看 Mac 里所有 Agent（Claude Code、Codex 等）：
+
+- 谁在等你、谁在工作、谁做完了，一眼看到；
+- 默认看对话，也能切到终端看原始画面；
+- 权限确认和选项题直接在手机上点，不用回到电脑前；
+- Agent 等你时收到推送，桌面卡片上也能直接点按钮回答。
+
+连接方式：Mac 上运行 `ddup-bridge`（`bridge/`），它连本机的 herdr-core。手机通过局域网或 Tailscale 直接连你自己的 Mac，不经过任何中转服务器。扫码配对时，手机记下这台 Mac 的公钥；之后的通信用 X25519 + AES-256-GCM 端到端加密。
+
+限制：
+
+- App 还没上架，要用自己的华为开发者账号签名安装。推送要用你自己在 AppGallery Connect 建的项目和 Push Kit 服务账号密钥；这些都放在本地，不进仓库。
+- 在外面使用要靠 Tailscale（手机端可用 MeshArc）。如果 Mac 上开着占用 VPN 通道的代理 App，用 `scripts/tailscale-service` 跑一个不占 VPN 通道的 userspace 节点。
+
+安装和使用见 [`docs/harmony/SETUP.md`](docs/harmony/SETUP.md)，协议和设计见 [`docs/harmony/DESIGN.md`](docs/harmony/DESIGN.md)。
+
+<br clear="right">
 
 ## 现状和限制
 
@@ -79,6 +102,8 @@ scripts/uninstall --purge-data   # 同时删除 DD-up 自己的浏览器资料
 | `patches/herdr-app` | 宿主粘合补丁，在 v0.1.12 上用 `git am` 应用 |
 | `mods/`、`layouts/` | 上面说的 mod 和布局 |
 | `brand.env`、`assets/icon` | 名称和图标 |
+| `bridge/` | `ddup-bridge`：手机 App 和 Mac 之间的桥接服务（Rust） |
+| `mobile/harmony/` | 鸿蒙 App“码上”（ArkTS） |
 | `docs/` | 决策、能力矩阵、进度和验收记录 |
 
 开发用的隔离测试环境（独立的 home、core 和 session，不碰正式 Herdr）见 `scripts/dev --help` 和 [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)。
