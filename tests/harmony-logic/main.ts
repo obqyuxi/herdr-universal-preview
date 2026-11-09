@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { b64urlDecode, b64urlEncode, equal, utf8, fromUtf8 } from './Bytes.ts';
 import { clientKeys, x25519Private, XKey, Records } from './Crypto.ts';
-import { parsePairLink } from './Link.ts';
+import { isTailnet, mergeHosts, parsePairLink } from './Link.ts';
 import { Session, Conn } from './Session.ts';
 import { Agent, Group } from './Agents.ts';
 import { cardValues } from './Cards.ts';
@@ -37,6 +37,9 @@ check('vectors: first s2c record opens', equal(keys.recv.open(b64urlDecode(v.s2c
 const raw = new Uint8Array([0xfb, 0xff, 0x00, 0x10, 0x83, 0xff, 0xfe]);
 check('base64url round trip', equal(b64urlDecode(b64urlEncode(raw)), raw) && b64urlEncode(raw) === Buffer.from(raw).toString('base64url'));
 check('utf8 round trip', fromUtf8(utf8('需要你处理 ✓')) === '需要你处理 ✓');
+check('tailnet addresses', isTailnet('100.p.q.r') && isTailnet('100.64.0.1') && !isTailnet('100.128.0.1') && !isTailnet('192.168.0.2'));
+check('merged hosts: winner first, old Tailscale address kept',
+  JSON.stringify(mergeHosts('192.168.0.9', ['192.168.0.9', '10.0.0.3'], ['192.168.0.2', '100.64.0.5'])) === '["192.168.0.9","10.0.0.3","192.168.0.2","100.64.0.5"]');
 const recs = new Records();
 recs.push(new Uint8Array([0, 0, 0, 2, 7]));
 check('records wait for a whole record', recs.pop() === null);
@@ -142,6 +145,8 @@ check('markSeen writes herdr.seen', await until('seen label', () => (s.agents.ge
 await s.connect();
 check('saved device token reconnects', s.conn === Conn.Ready, s.error);
 check('events flow again after reconnect', await until('agents', () => s.agents.get(agentT) !== undefined));
+const pong = await s.request({ t: 'ping' }, 3000);
+check('the bridge answers the heartbeat with its addresses', pong.t === 'pong' && Array.isArray(pong.hosts), JSON.stringify(pong));
 
 s.setForeground(false);
 await s.forget();

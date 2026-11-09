@@ -14,10 +14,12 @@ scripts/bridge-service uninstall   # 停止并移除（配对记录和密钥保�
 - 登录后自动启动，进程退出后自动拉起。它连的是日常 core（`~/.local/bin/hc`，DD-up 和官方 Herdr 共用的那个）。
 - 状态目录 `~/Library/Application Support/DD-up/bridge/`：`config.json`、`identity.json`、`devices.json`、`push-key.json`（全部 0600）。
 - 只接受本机、局域网私有地址和 Tailscale 地址的连接。
-- Tailscale（2026-11-08 已配好）：
-  - Mac 地址 100.m.n.o，开机自启靠 LaunchAgent `dev.ddup.tailscale-open`。
+- Tailscale（2026-11-08 已配好；2026-11-09 发现 Mac 上的官方 App 处于“已停止”，见 D35）：
+  - **Mac 上必须用官方 Tailscale App**。代理 App 内置的 Tailscale 不接受手机连进来，开着它也连不上。
+  - Mac 地址 100.m.n.o（官方 App 那个节点；代理 App 内置的是另一个节点 （另一个节点），100.a.b.c，没用），开机自启靠 LaunchAgent `dev.ddup.tailscale-open`（只负责打开 App，App 里是“已停止”的话不会自己连上）。
+  - `ddup-bridge status` 的 `addresses` 一行能看出 Mac 现在有没有 Tailscale 地址（100.64–100.127 开头）。
   - 手机装了 MeshArc（`io.github.tailscaleohos`，同一个账号，地址 100.p.q.r）。
-  - 二维码里同时带局域网地址和 Tailscale 地址，App 会同时去连，谁先连上就用谁。
+  - 二维码里同时带局域网地址和 Tailscale 地址，App 会同时去连，谁先连上就用谁。之后每次连上，桥接服务都会告诉 App 最新地址，App 自动记住，所以配对时 Tailscale 没开也不用重配，在家连一次即可。
   - 两边之间暂时没有直连，走的是新加坡的中继（DERP），往返 0.6 到 4 秒，所以连接超时设成 12 秒。
 - **鸿蒙同一时间只能有一个 VPN。** MeshArc 连上后会顶掉 代理 App，反过来也一样。在家用 Wi-Fi 不需要 MeshArc；在外面要连 Mac，就切到 MeshArc。
 

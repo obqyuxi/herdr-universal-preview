@@ -1,12 +1,13 @@
 // The app's one connection: pairing, connecting (trying each address of the
 // Mac), the core's events, reconnecting when the app returns to the
 // foreground, push registration, and the calls the pages make.
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { connection } from '@kit.NetworkKit';
 import { b64urlDecode, b64urlEncode, fromUtf8 } from './Bytes';
 import { ControlMsg, SecureSocket } from './Secure';
 import { HcClient, HelloResult, LineSplitter, RESIZE, StreamSink } from './Hc';
 import { Agent, AgentStore, EventLine, SubscribeResult } from './Agents';
-import { PairLink, wsUrl } from './Link';
+import { isTailnet, mergeHosts, PairLink, wsUrl } from './Link';
 import { keysFor, parsePrompt, PromptInfo } from './Prompt';
 import { cardValues, Cards } from './Cards';
 import { util } from '@kit.ArkTS';
@@ -23,6 +24,12 @@ export const CONN_TEXT: string[] = ['未连接', '连接中…', '已连接', '�
 
 // Generous: through a Tailscale relay (DERP) one round trip can take a second or more.
 const CONNECT_TIMEOUT_MS = 12000;
+// Heartbeat while the app is in front (D35): a link that died without a word (walked
+// off the Wi-Fi, switched to mobile data) is noticed in seconds, not minutes.
+const PING_EVERY_MS = 15000;
+const PING_TIMEOUT_MS = 10000;
+// After a network change or coming back to the front, the old link must answer quickly.
+const PROBE_TIMEOUT_MS = 5000;
 
 class EmptyParams {
 }
@@ -229,6 +236,14 @@ export class Session {
   private pairing: boolean = false;
   /// Only the newest dial may become the session.
   private dialGen: number = 0;
+  /// The bridge answers pings (one older than D35 doesn't: no heartbeat then).
+  private heartbeat: boolean = false;
+  private pingTimer: number = -1;
+  private net: connection.NetConnection | null = null;
+  private netTimer: number = -1;
+  /// The bridge last said this Mac has no Tailscale address: away from its network
+  /// the phone can't reach it.
+  macOffTailnet: boolean = false;
   private listeners: Array<() => void> = [];
 
   subscribe(fn: () => void): void {
@@ -258,6 +273,7 @@ export class Session {
   }
 
   async start(): Promise<void> {
+    this.watchNetwork();
     if (!this.loaded) {
       this.machine = await loadMachine();
       this.loaded = true;
@@ -294,6 +310,8 @@ export class Session {
     };
     await saveMachine(m);
     this.machine = m;
+    this.heartbeat = reply.hosts !== undefined;
+    this.learnHosts(reply.hosts);
     await this.afterAuth();
   }
 
@@ -314,7 +332,9 @@ export class Session {
     this.clearRetry();
     try {
       const first: ControlMsg = { t: 'auth', device_id: m.deviceId, token: m.token };
-      await this.dial(m.hosts, m.port, b64urlDecode(m.key), first);
+      const reply = await this.dial(m.hosts, m.port, b64urlDecode(m.key), first);
+      this.heartbeat = reply.hosts !== undefined;
+      this.learnHosts(reply.hosts);
       await this.afterAuth();
     } catch (e) {
       const msg = (e as Error).message;
@@ -332,6 +352,114 @@ export class Session {
       this.changed();
       this.scheduleRetry();
     }
+  }
+
+  /// One line on what to check when the Mac can't be reached (or soon won't be).
+  hint(): string {
+    const m = this.machine;
+    if (m === null) {
+      return '';
+    }
+    if (this.conn === Conn.Ready) {
+      return this.macOffTailnet && !isTailnet(this.host) ? 'Mac 上没有手机能连进来的 Tailscale，离开这个网络就连不上（要用官方 Tailscale App，代理 App 内置的不接受连入）' : '';
+    }
+    if (this.conn !== Conn.Failed || this.error.startsWith('这台手机已在 Mac 上被移除')) {
+      return '';
+    }
+    if (!m.hosts.some(isTailnet)) {
+      return '还不知道 Mac 的 Tailscale 地址，只能在同一个 Wi-Fi 下连接。打开 Mac 上的官方 Tailscale App 后在家连一次，就会自动记住';
+    }
+    return '不在同一个 Wi-Fi 时要靠 Tailscale：确认 Mac 上的官方 Tailscale App 和手机上的 Tailscale 都开着';
+  }
+
+  /// The bridge said where the Mac is now: remember new addresses for next time.
+  private learnHosts(reported: string[] | undefined): void {
+    if (reported === undefined) {
+      return;
+    }
+    const off = !reported.some(isTailnet);
+    const m = this.machine;
+    let changed = off !== this.macOffTailnet;
+    this.macOffTailnet = off;
+    if (m !== null) {
+      const next = mergeHosts(this.host, reported, m.hosts);
+      if (next.join(',') !== m.hosts.join(',')) {
+        m.hosts = next;
+        saveMachine(m).catch((): void => {});
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.changed();
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    if (this.heartbeat && this.foreground) {
+      this.pingTimer = setInterval(() => this.probe(PING_TIMEOUT_MS), PING_EVERY_MS);
+    }
+  }
+
+  private stopHeartbeat(): void {
+    if (this.pingTimer >= 0) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = -1;
+    }
+  }
+
+  /// Check that the Mac still answers on this link; if not, drop it and dial again.
+  private probe(timeoutMs: number): void {
+    const sock = this.sock;
+    if (!this.heartbeat || sock === null || this.conn !== Conn.Ready) {
+      return;
+    }
+    this.request({ t: 'ping' }, timeoutMs).then((r: ControlMsg) => {
+      this.learnHosts(r.hosts);
+    }).catch((): void => {
+      if (this.sock === sock && this.conn === Conn.Ready) {
+        this.lost('Mac 没有回应，正在重连');
+      }
+    });
+  }
+
+  /// Wi-Fi ↔ mobile data, a VPN coming up, back in range: look at the link now.
+  private watchNetwork(): void {
+    if (this.net !== null) {
+      return;
+    }
+    try {
+      const net = connection.createNetConnection();
+      net.on('netAvailable', (h: connection.NetHandle) => this.networkChanged());
+      net.on('netLost', (h: connection.NetHandle) => this.networkChanged());
+      net.register((err: BusinessError) => {
+        if (err) {
+          this.net = null;
+        }
+      });
+      this.net = net;
+    } catch (e) {
+      this.net = null;
+    }
+  }
+
+  private networkChanged(): void {
+    if (this.netTimer >= 0) {
+      clearTimeout(this.netTimer);
+    }
+    // Changes come in bursts (old network lost, new one up, VPN on top): act once.
+    this.netTimer = setTimeout(() => {
+      this.netTimer = -1;
+      if (!this.foreground || this.machine === null) {
+        return;
+      }
+      if (this.conn === Conn.Ready) {
+        this.probe(PROBE_TIMEOUT_MS);
+      } else if (this.conn === Conn.Failed) {
+        this.retryDelay = 2000;
+        this.connect();
+      }
+    }, 1500);
   }
 
   /// Dial every address at once (home Wi-Fi, Tailscale, ...); the first that answers wins
@@ -422,6 +550,7 @@ export class Session {
     }
     this.conn = Conn.Ready;
     this.retryDelay = 2000;
+    this.startHeartbeat();
     this.readPrompts();
     sock.sendControl({ t: 'foreground', on: this.foreground });
     if (this.pushToken) {
@@ -461,6 +590,7 @@ export class Session {
   }
 
   private drop(): void {
+    this.stopHeartbeat();
     const waiting = Array.from(this.waiters.values());
     this.waiters.clear();
     for (const w of waiting) {
@@ -513,8 +643,13 @@ export class Session {
     if (on && this.machine !== null && this.conn !== Conn.Ready && this.conn !== Conn.Connecting) {
       this.retryDelay = 2000;
       this.connect();
+    } else if (on && this.conn === Conn.Ready) {
+      // The link may have died while the app was away and not said so yet.
+      this.probe(PROBE_TIMEOUT_MS);
+      this.startHeartbeat();
     } else if (!on) {
       this.clearRetry();
+      this.stopHeartbeat();
     }
   }
 

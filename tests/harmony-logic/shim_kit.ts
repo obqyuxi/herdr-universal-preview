@@ -192,3 +192,11 @@ export const preferences = {
   }),
 };
 export const common = {};
+
+// ---------- @kit.NetworkKit (network changes: none in the harness) ----------
+export const connection = {
+  createNetConnection: () => ({
+    on: (_t: string, _cb: (h: object) => void) => {},
+    register: (cb: (e?: BusinessError) => void) => cb(undefined),
+  }),
+};

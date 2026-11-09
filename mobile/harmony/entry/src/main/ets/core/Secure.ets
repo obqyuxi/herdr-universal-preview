@@ -40,6 +40,8 @@ export interface ControlMsg {
   id?: number;
   /// Home-screen card ids (forms).
   ids?: string[];
+  /// Where the Mac can be reached now (ok, paired, pong).
+  hosts?: string[];
   error?: string;
   app?: string;
   cwd?: string;

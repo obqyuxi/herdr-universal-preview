@@ -44,6 +44,7 @@
     ],
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },
+      { "name": "ohos.permission.GET_NETWORK_INFO" },
       // A card button starts EntryAbility in the background ("call") to send the answer.
       {
         "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",

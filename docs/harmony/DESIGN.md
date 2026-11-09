@@ -57,6 +57,14 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
 
 5 秒内没完成握手和认证，桥接服务会断开。
 
+### 3b. 保持连接（D35）
+
+- **心跳**：App 在前台时每 15 秒发 `ping`，10 秒没回就当连接已死，断开重拨。切回前台、或系统报告网络变化（Wi-Fi 和移动数据互切、VPN 起落，`@kit.NetworkKit` 的 `netAvailable`/`netLost`，1.5 秒内合并）时立即探一次，5 秒没回就重拨。
+- **桥接服务一侧**：每 25 秒发 WebSocket Ping；60 秒内没收到手机的任何帧（Pong、心跳或数据）就断开。否则手机走出 Wi-Fi 后，桥接服务会一直以为 App 在前台而不发推送。
+- **地址自动更新**：`ok`、`paired`、`pong` 都带上 Mac 现在的地址。App 把它们并进保存的地址表（先放刚连上的那个，再放新报的，旧的保留，最多 8 个），所以 Mac 换了局域网 IP、或配对时 Tailscale 没开，之后都能自动补上。
+- **Tailscale 提示**：桥接服务报的地址里没有 Tailscale 地址时，首页提示“离开这个网络就连不上”；连不上时，提示该检查什么。Mac 上的 Tailscale 地址消失超过约 1 分钟（连查两次），桥接服务给手机推一条“Mac 的 Tailscale 断了”。
+- 代理 App 内置的 Tailscale 只能让 Mac 访问别的设备，**不接受手机连进来**（2026-11-09 实测：手机经 MeshArc 连它的地址 `100.a.b.c:7841`，桥接服务一个连接都没收到）。Mac 上要用官方 Tailscale App。
+
 ## 4. 明文消息
 
 第一个字节是类型：
@@ -71,9 +79,11 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
 | 方向 | 消息 | 说明 |
 |---|---|---|
 | App→ | `{"t":"pair","code":"…","device":"Mate 70"}` | 用配对码配对 |
-| ←桥 | `{"t":"paired","device_id":"…","token":"…"}` | App 保存 `device_id` 和 `token`（存进 Asset Store）。之后等同认证成功 |
+| ←桥 | `{"t":"paired","device_id":"…","token":"…","hosts":["192.168.1.20","100.x.y.z"]}` | App 保存 `device_id` 和 `token`（存进 Asset Store）。之后等同认证成功。`hosts` 见 §3b |
 | App→ | `{"t":"auth","device_id":"…","token":"…"}` | 已配对设备每次连接时发 |
-| ←桥 | `{"t":"ok","bridge":"0.1.0","name":"…"}` | 认证成功，桥接服务启动 `hc connect`，开始转发 `0x00` |
+| ←桥 | `{"t":"ok","bridge":"0.1.0","name":"…","hosts":[…]}` | 认证成功，桥接服务启动 `hc connect`，开始转发 `0x00`。没有 `hosts` 的是 D35 之前的桥接服务，App 不发心跳 |
+| App→ | `{"t":"ping","id":4}` | 心跳（§3b），App 在前台时每 15 秒一次 |
+| ←桥 | `{"t":"pong","id":4,"hosts":[…]}` | `hosts`：这台 Mac 现在的局域网和 Tailscale 地址 |
 | ←桥 | `{"t":"error","code":"unauthorized"\|"pair_expired"\|"pair_invalid"\|"hc_failed","msg":"…"}` | 随后断开（`hc_failed` 除外） |
 | App→ | `{"t":"push_token","token":"…"}` | 登记或更新华为 Push Token；空串表示关闭推送 |
 | App→ | `{"t":"foreground","on":true}` | App 在前台时，桥接服务不给这台设备发推送 |
@@ -152,7 +162,8 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
   - HarmonyOS 7 已知问题：调用 `focus()` 不弹软键盘；华为输入法只发 `insertText`。所以输入不交给 xterm 处理，改用 ArkUI 原生输入框加快捷键栏。
 - 扫码：Scan Kit 默认界面（`scanBarcode.startScanForResult`）。也可以粘贴配对链接。
 - 推送：`pushService.getToken()`。前提：在 AppGallery Connect 建项目、开通推送服务，`module.json5` 里配置 `client_id`，并用关联该应用的签名。
-- 后台：App 退到后台后连接会被挂起。回到前台时重连并重新订阅；后台提醒全靠推送。
+- 后台：App 退到后台后连接会被挂起。回到前台时先探一下旧连接，死了就重连并重新订阅（§3b）；后台提醒全靠推送。
+- 窗口：所有页面都是深色 `#101114`，窗口背景和状态栏、导航条区域也设成同色、状态栏图标用白色（以前是默认白色两条，看起来不是全屏）。权限多了 `ohos.permission.GET_NETWORK_INFO`（监听网络变化，系统直接授予）。
 
 ## 8. 验收（四件事分开记录）
 

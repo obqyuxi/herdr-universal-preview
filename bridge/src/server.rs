@@ -29,6 +29,12 @@ pub const HC: u8 = 0x00;
 pub const CONTROL: u8 = 0x01;
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
 const PING_EVERY: Duration = Duration::from_secs(25);
+/// Nothing from the phone this long (it answers our pings, and pings us every 15 s while
+/// open): the link is dead, e.g. it walked off the Wi-Fi. Drop it, or the bridge would
+/// keep thinking the app is in front and hold back pushes (D35).
+const IDLE_LIMIT: Duration = Duration::from_secs(60);
+/// How often to look whether this Mac still has a Tailscale address.
+const TAILNET_CHECK: Duration = Duration::from_secs(30);
 
 pub fn log(msg: impl AsRef<str>) {
     eprintln!("[{}] {}", crate::state::now_ms() / 1000, msg.as_ref());
@@ -150,13 +156,16 @@ impl Ctx {
     }
 }
 
+/// A Tailscale (CGNAT 100.64/10) address.
+pub fn is_tailnet(v: std::net::Ipv4Addr) -> bool {
+    let o = v.octets();
+    o[0] == 100 && (o[1] & 0xc0) == 64
+}
+
 /// Loopback, private, link-local and Tailscale (100.64/10, fd7a:115c:a1e0::/48 ⊂ fc00::/7) addresses.
 pub fn is_near(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(v) => {
-            let o = v.octets();
-            v.is_loopback() || v.is_private() || v.is_link_local() || (o[0] == 100 && (o[1] & 0xc0) == 64)
-        }
+        IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local() || is_tailnet(v),
         IpAddr::V6(v) => {
             if let Some(m) = v.to_ipv4_mapped() {
                 return is_near(IpAddr::V4(m));
@@ -179,6 +188,7 @@ pub async fn serve(ctx: Arc<Ctx>) -> Result<()> {
     let (waiting, waiting_rx) = latest::channel(Vec::new());
     tokio::spawn(watch(ctx.clone(), waiting));
     tokio::spawn(cards(ctx.clone(), waiting_rx));
+    tokio::spawn(tailnet(ctx.clone()));
     loop {
         let (stream, peer) = listener.accept().await?;
         if !ctx.config.allow_public && !is_near(peer.ip()) {
@@ -232,7 +242,11 @@ async fn connection(ctx: Arc<Ctx>, stream: TcpStream, peer: SocketAddr) -> Resul
             match result {
                 Ok((d, token)) => {
                     log(format!("{peer}: paired new device {} ({})", d.name, d.id));
-                    sink.send(seal_control(&mut send, &json!({"t": "paired", "device_id": d.id, "token": token, "name": ctx.config.display_name()}))).await?;
+                    sink.send(seal_control(
+                        &mut send,
+                        &json!({"t": "paired", "device_id": d.id, "token": token, "name": ctx.config.display_name(), "hosts": crate::near_hosts()}),
+                    ))
+                    .await?;
                     d
                 }
                 Err(e) => {
@@ -258,7 +272,11 @@ async fn connection(ctx: Arc<Ctx>, stream: TcpStream, peer: SocketAddr) -> Resul
                 sink.send(seal_control(&mut send, &json!({"t": "error", "code": "unauthorized"}))).await?;
                 bail!("unknown or revoked device");
             };
-            sink.send(seal_control(&mut send, &json!({"t": "ok", "bridge": env!("CARGO_PKG_VERSION"), "name": ctx.config.display_name()}))).await?;
+            sink.send(seal_control(
+                &mut send,
+                &json!({"t": "ok", "bridge": env!("CARGO_PKG_VERSION"), "name": ctx.config.display_name(), "hosts": crate::near_hosts()}),
+            ))
+            .await?;
             d
         }
         _ => bail!("expected pair or auth"),
@@ -359,7 +377,8 @@ async fn relay(
     let result: Result<()> = async {
         loop {
             tokio::select! {
-                m = source.next() => {
+                m = tokio::time::timeout(IDLE_LIMIT, source.next()) => {
+                    let Ok(m) = m else { bail!("nothing from the phone for {} s", IDLE_LIMIT.as_secs()) };
                     let Some(m) = m else { return Ok(()) };
                     let bytes = match m? {
                         Message::Binary(b) => b,
@@ -423,6 +442,8 @@ async fn on_control(ctx: &Arc<Ctx>, conn: u64, device: &str, v: &Value) -> Optio
             }
             None
         }
+        // The app's heartbeat; the answer also carries where this Mac can be reached now.
+        "ping" => Some(json!({"t": "pong", "id": v["id"], "hosts": crate::near_hosts()})),
         "forms" => {
             let forms: Vec<String> = v["ids"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_owned)).collect();
             let _g = ctx.files.lock().unwrap();
@@ -499,6 +520,40 @@ async fn on_control(ctx: &Arc<Ctx>, conn: u64, device: &str, v: &Value) -> Optio
             })
         }
         _ => None,
+    }
+}
+
+/// Away from home the phone reaches this Mac only over Tailscale: say so when it goes
+/// away (two checks in a row, so a reconnect doesn't count).
+async fn tailnet(ctx: Arc<Ctx>) {
+    let up = || crate::near_hosts().iter().any(|h| h.parse().is_ok_and(is_tailnet));
+    let (mut was, mut down) = (up(), 0);
+    loop {
+        tokio::time::sleep(TAILNET_CHECK).await;
+        if up() {
+            if !was {
+                log("Tailscale is up again: the phone can connect from anywhere");
+            }
+            (was, down) = (true, 0);
+            continue;
+        }
+        down += 1;
+        if was && down == 2 {
+            was = false;
+            log("Tailscale on this Mac is down: the phone can only connect on the same network now");
+            let ctx = ctx.clone();
+            let alert = Alert {
+                terminal: "bridge".into(),
+                why: crate::watch::Why::NeedsYou,
+                title: "码上 · Mac 的 Tailscale 断了".into(),
+                body: "现在只有和 Mac 在同一个 Wi-Fi 时才连得上。在 Mac 上重新打开 Tailscale 即可".into(),
+            };
+            match tokio::task::spawn_blocking(move || ctx.push(&alert)).await {
+                Ok(Ok(m)) => log(format!("pushed tailscale notice: {m}")),
+                Ok(Err(e)) => log(format!("tailscale notice not pushed: {e:#}")),
+                Err(e) => log(format!("tailscale notice not pushed: {e}")),
+            }
+        }
     }
 }
 

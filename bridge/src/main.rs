@@ -185,6 +185,7 @@ fn main() -> Result<()> {
             let id = store.identity()?;
             println!("state dir   {}", store.dir.display());
             println!("listen      {}{}", c.listen, if c.allow_public { " (public allowed)" } else { " (private and Tailscale peers only)" });
+            println!("addresses   {}", near_hosts().join(", "));
             println!("hc          {}{}", c.hc_path().display(), c.session.as_ref().map(|s| format!(" --session {s}")).unwrap_or_default());
             println!("bridge key  {}", B64.encode(crypto::public_of(&id)));
             println!("devices     {}", store.devices()?.devices.len());
@@ -211,14 +212,14 @@ fn ago(ms: u64) -> String {
     }
 }
 
-/// Private LAN addresses first, then Tailscale.
-fn near_hosts() -> Vec<String> {
+/// Private LAN addresses first, then Tailscale. Also sent to the phone on every
+/// login and heartbeat, so it learns new addresses (D35).
+pub fn near_hosts() -> Vec<String> {
     let mut lan = vec![];
     let mut tailnet = vec![];
     for i in if_addrs::get_if_addrs().unwrap_or_default() {
         if let IpAddr::V4(v) = i.ip() {
-            let o = v.octets();
-            if o[0] == 100 && (o[1] & 0xc0) == 64 {
+            if server::is_tailnet(v) {
                 tailnet.push(v.to_string());
             } else if v.is_private() {
                 lan.push(v.to_string());

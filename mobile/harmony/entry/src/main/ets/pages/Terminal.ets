@@ -79,8 +79,6 @@ class Attachment {
 
 /// The font size people pinched to, kept while the app runs.
 let fontSize = 12;
-/// Open agents on their conversation (else the terminal); remembered while the app runs.
-let preferChat = true;
 // In the conversation, only the keys that steer an agent.
 const CHAT_KEYS = ['Esc', 'Enter', 'Tab', '^C'];
 
@@ -169,7 +167,8 @@ struct Terminal {
     this.title = folder && chatApp(a.app) ? folder : folder ? `${a.label()} · ${folder}` : a.label();
     this.detail = a.detail();
     if (chatApp(a.app) && !this.hasChat) {
-      this.chat = preferChat;
+      // Agents always open as a conversation; 终端 is one tap away for the raw screen.
+      this.chat = true;
     }
     this.hasChat = chatApp(a.app);
     this.app = a.app;
@@ -477,7 +476,6 @@ struct Terminal {
                 .backgroundColor((i === 0) === this.chat ? '#E6E6E6' : Color.Transparent)
                 .onClick(() => {
                   this.chat = i === 0;
-                  preferChat = this.chat;
                 })
             }, (label: string) => label)
           }.padding(2).borderRadius(15).backgroundColor('#22262B')

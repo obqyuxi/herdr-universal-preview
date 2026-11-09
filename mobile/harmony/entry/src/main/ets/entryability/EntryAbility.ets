@@ -10,6 +10,8 @@ import { Cards, shortLabel } from '../core/Cards';
 import { PromptOption } from '../core/Prompt';
 
 const DOMAIN = 0xd0d0;
+/// The colour of every page (pages/*.ets).
+const APP_BACKGROUND = '#101114';
 
 /// What a card button sends (ets/widget/pages/WidgetCard.ets).
 interface CardAnswer {
@@ -134,7 +136,23 @@ export default class EntryAbility extends UIAbility {
       }
       // The soft keyboard shrinks the page instead of pushing it up, so the terminal
       // re-fits (fewer rows) and the title stays on screen.
-      windowStage.getMainWindowSync().getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+      const win = windowStage.getMainWindowSync();
+      win.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+      // Every page is dark: paint the strips behind the status bar and the gesture
+      // bar the same colour (they were the default white), with light status icons.
+      try {
+        win.setWindowBackgroundColor(APP_BACKGROUND);
+      } catch (e) {
+        hilog.warn(DOMAIN, 'ddup', 'window background: %{public}s', (e as BusinessError).message);
+      }
+      win.setWindowSystemBarProperties({
+        statusBarColor: APP_BACKGROUND,
+        statusBarContentColor: '#FFFFFF',
+        navigationBarColor: APP_BACKGROUND,
+        navigationBarContentColor: '#FFFFFF'
+      }).catch((e: BusinessError) => {
+        hilog.warn(DOMAIN, 'ddup', 'system bars: %{public}d', e.code);
+      });
       notificationManager.requestEnableNotification(this.context).catch((e: BusinessError) => {
         hilog.warn(DOMAIN, 'ddup', 'notifications not enabled: %{public}d', e.code);
       });

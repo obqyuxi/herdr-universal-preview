@@ -54,3 +54,22 @@ export function wsUrl(host: string, port: number): string {
   const h = host.includes(':') ? `[${host}]` : host;
   return `ws://${h}:${port}/v1`;
 }
+
+/// A Tailscale address (100.64.0.0/10): the way to the Mac away from its network.
+export function isTailnet(host: string): boolean {
+  const m = /^100\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
+  return m !== null && (Number.parseInt(m[1]) & 0xc0) === 64;
+}
+
+/// Addresses to dial next time (D35): the one that answered, what the bridge reports
+/// now, then the ones we had (so a Tailscale address survives while it's switched off
+/// on the Mac). At most 8; all are dialled at once anyway.
+export function mergeHosts(winner: string, reported: string[], old: string[]): string[] {
+  const out: string[] = [];
+  for (const h of [winner].concat(reported, old)) {
+    if (h && !out.includes(h)) {
+      out.push(h);
+    }
+  }
+  return out.slice(0, 8);
+}

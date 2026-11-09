@@ -78,6 +78,7 @@ struct Index {
   @State machineName: string = '';
   @State conn: number = Conn.Idle;
   @State error: string = '';
+  @State hint: string = '';
   @State rows: RowData[] = [];
   @State linkText: string = '';
   @State busy: boolean = false;
@@ -109,6 +110,7 @@ struct Index {
     this.machineName = s.machine?.name ?? '';
     this.conn = s.conn;
     this.error = s.error;
+    this.hint = s.hint();
     this.rows = rowsOf(s.agents.list());
     this.openPending();
   }
@@ -140,9 +142,7 @@ struct Index {
     }
     this.busy = true;
     try {
-      if (Session.shared.machine !== null) {
-        await Session.shared.forget();
-      }
+      // The Mac paired so far is replaced only once the new pairing succeeds.
       await Session.shared.pair(parsePairLink(text));
       this.linkText = '';
       promptAction.showToast({ message: '配对成功' });
@@ -151,6 +151,8 @@ struct Index {
       const text = m === 'pair_invalid' ? '配对码无效或已用过，请在 DD-up 里点手机图标，再扫一次新的二维码'
         : m === 'pair_expired' ? '配对码已过期（10 分钟），请重新生成' : m;
       promptAction.showToast({ message: text, duration: 4000 });
+      // Pairing dropped the old link: go back to the Mac paired before, if any.
+      Session.shared.connect();
     }
     this.busy = false;
     this.refresh();
@@ -231,8 +233,11 @@ struct Index {
         Row({ space: 6 }) {
           Circle().width(8).height(8)
             .fill(this.conn === Conn.Ready ? '#36C275' : this.conn === Conn.Connecting ? '#FFB547' : '#FF5D5D')
-          Text(this.conn === Conn.Failed && this.error ? `${CONN_TEXT[this.conn]}：${this.error}` : CONN_TEXT[this.conn])
+          Text(this.conn === Conn.Failed && this.error && this.error !== CONN_TEXT[this.conn] ? `${CONN_TEXT[this.conn]}：${this.error}` : CONN_TEXT[this.conn])
             .fontSize(12).fontColor('#9AA0A6').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        if (this.hint) {
+          Text(this.hint).fontSize(12).fontColor('#FFB547').maxLines(3).margin({ top: 4 })
         }
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
       Button('网页').fontSize(13).height(30).padding({ left: 10, right: 10 })
