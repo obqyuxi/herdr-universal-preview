@@ -21,6 +21,7 @@
 | `scripts/build` | 编译 `.work/herdr-app`，打包 `artifacts/apps.noindex/Herdr Preview Dev.app` |
 | `scripts/dev` | 测试 core 和 App 的启停、`hc`、`app`、隔离检查与快照 |
 | `scripts/test` | 项目测试（静态检查、单元测试、补丁检查；`--bridge` 跑桥接服务和鸿蒙核心逻辑的联调） |
+| `scripts/bridge-service` / `scripts/tailscale-service` | 日常桥接服务和手机用的 Tailscale 节点（LaunchAgent，D27/D36） |
 
 ## 文档索引
 

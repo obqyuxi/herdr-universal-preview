@@ -63,7 +63,9 @@ WebSocket 地址 `ws://<host>:<port>/v1`。所有消息都是二进制帧。
 - **桥接服务一侧**：每 25 秒发 WebSocket Ping；60 秒内没收到手机的任何帧（Pong、心跳或数据）就断开。否则手机走出 Wi-Fi 后，桥接服务会一直以为 App 在前台而不发推送。
 - **地址自动更新**：`ok`、`paired`、`pong` 都带上 Mac 现在的地址。App 把它们并进保存的地址表（先放刚连上的那个，再放新报的，旧的保留，最多 8 个），所以 Mac 换了局域网 IP、或配对时 Tailscale 没开，之后都能自动补上。
 - **Tailscale 提示**：桥接服务报的地址里没有 Tailscale 地址时，首页提示“离开这个网络就连不上”；连不上时，提示该检查什么。Mac 上的 Tailscale 地址消失超过约 1 分钟（连查两次），桥接服务给手机推一条“Mac 的 Tailscale 断了”。
-- 代理 App 内置的 Tailscale 只能让 Mac 访问别的设备，**不接受手机连进来**（2026-11-09 实测：手机经 MeshArc 连它的地址 `100.a.b.c:7841`，桥接服务一个连接都没收到）。Mac 上要用官方 Tailscale App。
+- Mac 一侧的 Tailscale（D36）：用 DD-up 自己的 userspace `tailscaled`（`scripts/tailscale-service`，节点 `mac-ddup`）。它没有网卡，连到它地址的 TCP 被转到本机同端口，所以桥接服务看到的对端是 `127.0.0.1`。它的地址桥接服务通过 `tailscale --socket=… ip -4` 问到（缓存 20 秒），和网卡上的地址一起报给 App。
+  - 不用 代理 App 内置的 Tailscale：只能让 Mac 访问别的设备，不接受连入（2026-11-09 实测：手机经 MeshArc 连 `100.a.b.c:7841`，桥接服务一个连接都没收到）。
+  - 不用官方 Tailscale App：它和 代理 App 互相抢 macOS 的 VPN 通道（用户确认）。
 
 ## 4. 明文消息
 

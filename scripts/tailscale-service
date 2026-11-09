@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# DD-up's own Tailscale node for the phone (D36): open-source tailscaled in
+# userspace mode as a LaunchAgent. It takes no VPN slot, so it runs next to
+# 代理 App (whose built-in Tailscale does not accept incoming connections,
+# and whose packet tunnel the official Tailscale app keeps displacing).
+# Incoming connections to this node's address reach this Mac's localhost, so the
+# phone dials ddup-bridge at it. No root, no brew: built with the Go on PATH.
+set -euo pipefail
+
+LABEL=dev.ddup.tailscaled
+VERSION=${DDUP_TAILSCALE_VERSION:-v1.86.5}
+DIR="$HOME/Library/Application Support/DD-up/tailscale"
+BIN="$DIR/bin"
+SOCK="$DIR/tailscaled.sock"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/DD-up/tailscaled.log"
+DOMAIN="gui/$(id -u)"
+HOSTNAME_TS=mac-ddup
+
+usage() {
+  cat <<EOF
+Usage: scripts/tailscale-service <command>
+
+  install     build tailscale + tailscaled $VERSION (go install) into $BIN,
+              write $PLIST and start it
+  login       join the tailnet as "$HOSTNAME_TS" (prints a URL to approve in a browser)
+  status      launchd state and \`tailscale status\`
+  uninstall   stop it and remove the LaunchAgent and binaries (node state stays in $DIR/state)
+  logs        follow $LOG
+EOF
+}
+
+ts() { "$BIN/tailscale" --socket="$SOCK" "$@"; }
+loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; }
+
+write_plist() {
+  mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+  [[ -f $PLIST ]] && cp "$PLIST" "$PLIST.backup-$(date +%Y%m%d-%H%M%S)"
+  /usr/bin/python3 -I - "$PLIST" "$BIN/tailscaled" "$DIR/state" "$SOCK" "$LOG" "$LABEL" <<'PY'
+import plistlib, sys
+path, binary, state, sock, log, label = sys.argv[1:]
+plistlib.dump({
+    "Label": label,
+    "ProgramArguments": [binary, "--tun=userspace-networking", f"--statedir={state}", f"--socket={sock}", "--port=0"],
+    "RunAtLoad": True,
+    "KeepAlive": True,
+    "ThrottleInterval": 10,
+    "ProcessType": "Background",
+    "StandardOutPath": log,
+    "StandardErrorPath": log,
+}, open(path, "wb"))
+PY
+}
+
+case ${1:-} in
+  -h|--help|"") usage ;;
+  install)
+    command -v go >/dev/null || { echo "error: go not found" >&2; exit 1; }
+    mkdir -p "$BIN" "$DIR/state"
+    chmod 700 "$DIR" "$DIR/state"
+    (cd /tmp && GOBIN="$BIN" go install "tailscale.com/cmd/tailscale@$VERSION" "tailscale.com/cmd/tailscaled@$VERSION")
+    loaded && launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+    write_plist
+    launchctl bootstrap "$DOMAIN" "$PLIST"
+    for _ in $(seq 1 30); do [[ -S $SOCK ]] && break; sleep 0.2; done
+    ts status 2>&1 | head -3 || true
+    echo "service: $(launchctl print "$DOMAIN/$LABEL" | awk -F'= ' '/state =/{print $2; exit}')  log: $LOG"
+    ;;
+  login) ts up --hostname="$HOSTNAME_TS" --accept-dns=false --accept-routes=false ;;
+  status)
+    if loaded; then launchctl print "$DOMAIN/$LABEL" | awk '/state =|pid =|last exit code/'; else echo "not installed"; fi
+    [[ -x $BIN/tailscale ]] && { ts ip -4 2>&1 || true; }
+    ;;
+  uninstall)
+    loaded && launchctl bootout "$DOMAIN/$LABEL" || true
+    rm -f "$PLIST"
+    rm -rf "$BIN"
+    echo "removed the service; node state stays in $DIR/state (delete it and remove $HOSTNAME_TS in the Tailscale admin console to forget the node)"
+    ;;
+  logs) tail -f "$LOG" ;;
+  *) usage >&2; exit 2 ;;
+esac

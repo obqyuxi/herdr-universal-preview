@@ -226,8 +226,55 @@ pub fn near_hosts() -> Vec<String> {
             }
         }
     }
+    for h in userspace_tailnet() {
+        if !tailnet.contains(&h) {
+            tailnet.push(h);
+        }
+    }
     lan.extend(tailnet);
     lan
+}
+
+/// DD-up's own userspace tailscaled (`scripts/tailscale-service`, D36) has no network
+/// interface: ask it for its address. Next to the bridge's state directory; cached 20 s.
+fn userspace_tailnet() -> Vec<String> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
+    if let Some((at, v)) = CACHE.lock().unwrap().as_ref()
+        && at.elapsed() < Duration::from_secs(20)
+    {
+        return v.clone();
+    }
+    let v: Vec<String> = (|| {
+        let dir = state::default_dir().parent()?.join("tailscale");
+        let sock = dir.join("tailscaled.sock");
+        if !sock.exists() {
+            return None;
+        }
+        let mut child = std::process::Command::new(dir.join("bin/tailscale"))
+            .arg(format!("--socket={}", sock.display()))
+            .args(["ip", "-4"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()?;
+        let start = Instant::now();
+        while child.try_wait().ok()?.is_none() {
+            if start.elapsed() > Duration::from_secs(2) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+        Some(out.lines().filter_map(|l| l.trim().parse().ok()).filter(|v| server::is_tailnet(*v)).map(|v: std::net::Ipv4Addr| v.to_string()).collect())
+    })()
+    .unwrap_or_default();
+    *CACHE.lock().unwrap() = Some((Instant::now(), v.clone()));
+    v
 }
 
 fn encode(s: &str) -> String {

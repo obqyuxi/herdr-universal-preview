@@ -404,3 +404,14 @@
   - 测试中 App 清掉了旧配对：以前用新链接配对时先删旧配对再连，新的连不上就两头落空。已改成新配对成功后才替换，失败则重连原来的 Mac。手机已经通过 USB 重新配对（新设备 （上一台），推送和卡片已登记），吊销了旧的 （旧设备）。
 - 未测：系统网络变化回调触发的重连（没有在真机上切换 Wi-Fi/5G）；桥接服务的 Tailscale 断开推送（Mac 上官方 Tailscale 一直没开，没有出现“有→无”的变化）；真正在外面经 Tailscale 连接（要等 Mac 上官方 Tailscale 打开）。
 
+## D36 Mac 上用 DD-up 自己的 userspace tailscaled（2026-11-09）
+
+- 背景（D35）：官方 Tailscale App 和 代理 App 互相抢网络，用户确认；代理 App 内置的 Tailscale 不接受连入。用户同意改用开源 `tailscaled` 的 userspace 模式。
+- 做法：`scripts/tailscale-service install` 用本机已有的 Go 编译 `tailscale` 和 `tailscaled` v1.86.5，放到 `~/Library/Application Support/DD-up/tailscale/bin`。以 LaunchAgent `dev.ddup.tailscaled` 运行，参数 `--tun=userspace-networking`，状态和 socket 也在这个目录下。不用 brew，不用 sudo，不占 VPN 通道。`login` 用 `--hostname=mac-ddup --accept-dns=false --accept-routes=false` 加入 tailnet，用户在浏览器里登录并批准。节点地址 100.x.y.z。
+- 桥接服务：`near_hosts` 会向这个 `tailscaled` 询问地址（2 秒超时，缓存 20 秒），所以配对链接、`ok`/`pong` 里的地址和“Tailscale 断了”的检测都包含它。
+- 验证（真机，手机关 Wi-Fi、走 5G，经 MeshArc；已移除 USB 端口转发）：
+  - 用只带 `100.x.y.z` 和局域网地址的链接配对成功，设备 （新设备）（吊销了上一台 （上一台））。强制停止 App 再打开，仍然经 `mac-ddup` 连上，首页“已连接”。
+  - 停掉 `dev.ddup.tailscaled` 80 秒：桥接服务约 1 分钟后推送“Mac 的 Tailscale 断了”，华为返回 Success。恢复后日志记录“Tailscale is up again”。
+  - `ddup-bridge status` 的 addresses：`192.168.1.20, 100.x.y.z`。
+- 已知：`tailscaled` 的出站流量（控制面、中继）会经过 代理 App 的分流规则；目前能用，延迟没有测。官方 App 仍是“已停止”；登录时打开它的 LaunchAgent `dev.ddup.tailscale-open` 没有删，要不要删由用户决定。
+
