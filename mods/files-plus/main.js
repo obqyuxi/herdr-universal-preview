@@ -28,8 +28,21 @@ const absolute = p => /^(\/|[A-Za-z]:[\\/])/.test(p);
 // A clicked terminal link (`open:<path>` / `reveal:<path>`) also applies to the
 // folder the panel switches to right after, when the click focused another pane.
 const LINK_GRACE_MS = 2000;
-// Quick Look's own window: resizable, full screen, pinch/zoom. Returns at once.
-const quickLook = path => exec("sh", ["-c", '"$@" >/dev/null 2>&1 &', "sh", "qlmanage", "-p", path]).catch(() => {});
+// UI text in the macOS language (Chinese or English); `lang` is set in init.
+let lang = "en";
+const TEXT = {
+  en: { remote: "Files on a remote machine can't be previewed here yet", gone: "This file is no longer available",
+    binary: "Binary file · no text preview", unreadable: "Cannot preview this file (binary, too large, or unreadable)",
+    truncated: "… (file truncated)", opening: "Opening… (the preview steps aside while a menu or dialog is open)",
+    loadingFile: "Loading file…", loadingFiles: "Loading files…", noFiles: "No files", noFolder: "No folder",
+    limited: "File list limited to 500 entries per folder and 5,000 total", more: "More actions" },
+  zh: { remote: "远程机器上的文件暂不支持内嵌预览", gone: "这个文件已经不在了",
+    binary: "二进制文件，没有文本预览", unreadable: "无法预览这个文件（二进制、太大或无法读取）",
+    truncated: "…（文件已截断）", opening: "正在打开…（菜单或对话框打开时预览会暂时让开）",
+    loadingFile: "正在加载文件…", loadingFiles: "正在加载文件列表…", noFiles: "没有文件", noFolder: "没有文件夹",
+    limited: "文件列表上限：每个文件夹 500 项，总共 5,000 项", more: "更多操作" },
+};
+const tr = k => TEXT[lang][k] ?? TEXT.en[k];
 
 async function directory(path, on) {
   if (!on && window()?.platform === "windows") {
@@ -53,6 +66,12 @@ export default class Files extends View {
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.refresh(cx);
+    if (window()?.platform === "macos") cx.spawn(async cx => {
+      const r = await exec("defaults", ["read", "-g", "AppleLanguages"]).catch(() => null);
+      const first = r?.code === 0 ? r.stdout.match(/[A-Za-z][\w-]*/)?.[0] ?? "" : "";
+      lang = /^zh/i.test(first) ? "zh" : "en";
+      cx.notify();
+    });
     cx.timer.every(10000, cx => this.refresh(cx));
     // Cmd-click on a file or folder link in a terminal (the host sends it here).
     cx.spawn(async cx => {
@@ -192,31 +211,32 @@ export default class Files extends View {
       return;
     }
     this.closeNative();
-    if (path && kind && this.on) { this.fileError = "远程机器上的文件暂不支持内嵌预览"; cx?.notify(); return; }
+    if (path && kind && this.on) { this.fileError = "remote"; cx?.notify(); return; }
     if (!path || !cx) return;
     const context = this.context, on = this.on;
     cx.spawn(async cx => {
       try {
         const text = await readTextFile(full, { on });
         if (this.file !== path || !this.current(context)) return;
-        if (text === null) { this.fileError = "This file is no longer available"; return; }
-        if (text.includes("\0")) { this.fileError = "Binary file · no text preview"; return; }
+        if (text === null) { this.fileError = "gone"; return; }
+        if (text.includes("\0")) { this.fileError = "binary"; return; }
         const t = theme(), ext = path.includes(".") ? path.split(".").pop() : "txt";
         this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true,
-          value: text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
+          value: text.length > 400000 ? text.slice(0, 400000) + "\n" + tr("truncated") : text,
           font_family: settings().font_family, font_size: 12,
           syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
-      } catch { if (this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
+      } catch { if (this.file === path && this.current(context)) this.fileError = "unreadable"; }
       finally { cx.notify(); }
     });
   }
 
-  // Right-click menu (mods/files-plus-menu): Finder, default app, Quick Look, copy path.
+  // Right-click or ⋯ menu (mods/files-plus-menu): Finder, default app.
   menu(path, dir, cx) {
     cx?.stop_propagation();
-    if (!path) return;
+    // Finder and the default app are on this Mac; a remote path has no menu.
+    if (!path || this.on) return;
     const full = absolute(path) ? path : `${this.root}/${path}`;
-    openOverlay({ mod: "files-plus-menu", kind: "popup", width: 220, height: 200, props: { path: full, dir, remote: Boolean(this.on) } });
+    openOverlay({ mod: "files-plus-menu", kind: "popup", width: 210, height: 90, props: { path: full, dir, lang } });
   }
 
   fullPath() {
@@ -240,10 +260,6 @@ export default class Files extends View {
     return out;
   }
 
-  action(id, label, tip, t, run) {
-    return div().id(id).flex_none().cursor_pointer().text_size(12).text_color(t.muted).hover(s => s.text_color(t.foreground)).tooltip(tip).on_click(run).child(label);
-  }
-
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
@@ -252,17 +268,15 @@ export default class Files extends View {
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))
         .child(div().font_semibold().child("Files"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child((this.file && absolute(this.file) ? this.file.split(/[\\/]/).pop() : this.file) ?? this.root?.split(/[\\/]/).pop() ?? ""))
-        .when(Boolean(this.file) && !this.on, el => el
-          .child(this.action("files-zoom", "放大", "放大预览：快速查看窗口，可拖大、全屏、缩放", t, () => quickLook(this.fullPath())))
-          .child(this.action("files-reveal", "访达", "在访达中显示", t, () => exec("open", ["-R", this.fullPath()]).catch(() => {})))
-          .child(this.action("files-open-external", "默认应用", "用默认应用打开", t, () => exec("open", [this.fullPath()]).catch(() => {})))))
+        .when(Boolean(this.file) && !this.on, el => el.child(div().id("files-more").flex_none().px(4).rounded(5).cursor_pointer().text_size(16).text_color(t.muted)
+          .hover(s => s.text_color(t.foreground).bg(t.hover)).tooltip(tr("more")).on_click((_e, cx) => this.menu(this.fullPath(), false, cx)).child("⋯"))))
       .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6)
         .on_mouse_down("right", (_e, cx) => this.menu(this.root, true, cx)).children(this.rows("", 0, [], t))
-        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
-        .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
+        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || tr(this.loading ? "loadingFiles" : this.root ? "noFiles" : "noFolder"))))
+        .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child(tr("limited"))))))
       .when(Boolean(this.file) && Boolean(this.native), el => el.child(div().flex_1().min_h(0).relative()
         .child(herdr.nativeView.new(PREVIEW_ID, this.native)
-          .child(div().p(12).text_color(t.dim).child("正在打开…（菜单或对话框打开时预览会暂时让开）")))))
-      .when(Boolean(this.file) && !this.native, el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
+          .child(div().p(12).text_color(t.dim).child(tr("opening"))))))
+      .when(Boolean(this.file) && !this.native, el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(tr(this.fileError || "loadingFile"))));
   }
 }
