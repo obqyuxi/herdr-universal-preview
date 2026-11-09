@@ -6,7 +6,7 @@ DD-up 是在官方 Herdr 0.1.12 上加了本项目补丁的个人构建，装在
 |---|---|
 | 应用 | `~/Applications/DD-up.app`（bundle id `dev.ddup.app`，包含 Chromium 156，本机临时签名） |
 | 配置 | 使用日常的 `~/.config/herdr-app`：工作区、终端和 Agent 都是原来那套（同一个 herdr-core） |
-| 新增 mod | `files-plus`（Files，可直接查看 Office/PDF/图片/音视频）、`browser`（侧边 Chromium 浏览器）、`tabs-plus`（顶栏多出"浏览器"按钮） |
+| 新增 mod | `files-plus`（Files，可直接查看 Office/PDF/图片/音视频；右键菜单：在访达中显示、默认应用打开、放大预览、复制路径，菜单由 `files-plus-menu` 提供）、`browser`（侧边 Chromium 浏览器）、`tabs-plus`（顶栏多出"浏览器"按钮） |
 | 新增布局 | `dd-up`（官方 main 布局，把其中的 Files 和顶栏换成上面的 mod） |
 | 浏览器资料 | `~/Library/Application Support/DD-up/Chromium`（独立于 Chrome 和 Safari） |
 | 安装清单 | `~/Library/Application Support/DD-up/install-manifest.json`（记录路径和内容指纹） |

@@ -3,7 +3,7 @@
 
 Adds, never overwrites what isn't ours:
   <app dir>/<APP_NAME>.app
-  ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus,workspace-chrome-plus,phone-pair}
+  ~/.config/herdr-app/mods/{files-plus,files-plus-menu,browser,tabs-plus,workspace-chrome-plus,phone-pair}
   ~/.config/herdr-app/layouts/<LAYOUT>.json
 Records each with a content fingerprint in
   ~/Library/Application Support/<APP_EXE>/install-manifest.json
@@ -25,7 +25,7 @@ MANIFEST = STATE / "install-manifest.json"
 # Built apps sit in a ".noindex" folder so Spotlight and Launchpad don't list them.
 BUILT = ROOT / "artifacts/apps.noindex" / f"{NAME}.app"
 OFFICIAL = Path("/Applications/Herdr.app")
-MODS = ["files-plus", "browser", "tabs-plus", "workspace-chrome-plus", "phone-pair"]
+MODS = ["files-plus", "files-plus-menu", "browser", "tabs-plus", "workspace-chrome-plus", "phone-pair"]
 LAYOUT = BRAND["LAYOUT"]
 
 

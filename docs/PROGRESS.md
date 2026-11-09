@@ -58,6 +58,8 @@
 
 **2026-11-09：Mac 上改用 DD-up 自己的 userspace tailscaled（`mac-ddup`）**（D36）。和 代理 App 不冲突。手机走 5G 已经能经它连上 Mac；Tailscale 断开时的推送也验证过。
 
+**2026-11-09：Files 右键菜单和放大预览**（只改 Mod）。files-plus 的文件或文件夹右键（新 Mod `files-plus-menu`）可以：在访达中显示/打开、用默认应用打开、放大预览（快速查看 `qlmanage -p`）、复制路径。预览页顶栏有 `放大` · `访达` · `默认应用` 三个按钮。`scripts/test --mods` 已通过；已用 `scripts/install --mods-only` 装进日常 DD-up。实现但未完成 GUI 验收：菜单位置，以及快速查看窗口是否在最前。
+
 **用户 2026-11-02 收窄范围**：只要两件事，验收以这两件事为准。
 
 1. Files 面板点 Word/Excel/PPT/PDF/图片/音视频就能直接看（`mods/files-plus`）。

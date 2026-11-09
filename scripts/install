@@ -18,7 +18,7 @@ Usage: scripts/install [--dry-run] [--app-dir DIR] [--mods-only]
 
   Build first: scripts/build --daily (artifacts/apps.noindex/<APP_NAME>.app).
   Adds  DIR/<APP_NAME>.app (default ~/Applications),
-        ~/.config/herdr-app/mods/{files-plus,browser,tabs-plus,workspace-chrome-plus,phone-pair},
+        ~/.config/herdr-app/mods/{files-plus,files-plus-menu,browser,tabs-plus,workspace-chrome-plus,phone-pair},
         ~/.config/herdr-app/layouts/<LAYOUT>.json
   Refuses anything that exists and isn't ours. Never touches /Applications/Herdr.app,
   built-in mods/layouts, workspaces, terminals or agent sessions.

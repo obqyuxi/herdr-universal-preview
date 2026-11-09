@@ -4,7 +4,7 @@
 // On stock Herdr (no nativeView) it behaves like the shipped Files.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, openOverlay } from "herdr";
 import * as herdr from "herdr";
 
 function location() {
@@ -28,6 +28,8 @@ const absolute = p => /^(\/|[A-Za-z]:[\\/])/.test(p);
 // A clicked terminal link (`open:<path>` / `reveal:<path>`) also applies to the
 // folder the panel switches to right after, when the click focused another pane.
 const LINK_GRACE_MS = 2000;
+// Quick Look's own window: resizable, full screen, pinch/zoom. Returns at once.
+const quickLook = path => exec("sh", ["-c", '"$@" >/dev/null 2>&1 &', "sh", "qlmanage", "-p", path]).catch(() => {});
 
 async function directory(path, on) {
   if (!on && window()?.platform === "windows") {
@@ -209,6 +211,18 @@ export default class Files extends View {
     });
   }
 
+  // Right-click menu (mods/files-plus-menu): Finder, default app, Quick Look, copy path.
+  menu(path, dir, cx) {
+    cx?.stop_propagation();
+    if (!path) return;
+    const full = absolute(path) ? path : `${this.root}/${path}`;
+    openOverlay({ mod: "files-plus-menu", kind: "popup", width: 220, height: 200, props: { path: full, dir, remote: Boolean(this.on) } });
+  }
+
+  fullPath() {
+    return this.file && (absolute(this.file) ? this.file : `${this.root}/${this.file}`);
+  }
+
   rows(prefix, depth, out, t) {
     if (out.length >= TOTAL || depth > 40) return out;
     for (const entry of this.entries.get(prefix) ?? []) {
@@ -216,6 +230,7 @@ export default class Files extends View {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
       out.push(h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover))
         .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : this.show(path, cx))
+        .on_mouse_down("right", (_e, cx) => this.menu(path, entry.dir, cx))
         .child(entry.dir ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
         .child(svg(`mods/files/${entry.dir ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().flex_1().min_w(0).truncate().child(entry.name))
@@ -223,6 +238,10 @@ export default class Files extends View {
       if (entry.dir && open) this.rows(path, depth + 1, out, t);
     }
     return out;
+  }
+
+  action(id, label, tip, t, run) {
+    return div().id(id).flex_none().cursor_pointer().text_size(12).text_color(t.muted).hover(s => s.text_color(t.foreground)).tooltip(tip).on_click(run).child(label);
   }
 
   render(cx) {
@@ -233,9 +252,12 @@ export default class Files extends View {
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))
         .child(div().font_semibold().child("Files"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child((this.file && absolute(this.file) ? this.file.split(/[\\/]/).pop() : this.file) ?? this.root?.split(/[\\/]/).pop() ?? ""))
-        .when(Boolean(this.file) && !this.on, el => el.child(div().id("files-open-external").flex_none().cursor_pointer().text_size(12).text_color(t.muted).hover(s => s.text_color(t.foreground))
-          .on_click(() => { exec("open", [absolute(this.file) ? this.file : `${this.root}/${this.file}`]).catch(() => {}); }).child("用默认应用打开"))))
-      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], t))
+        .when(Boolean(this.file) && !this.on, el => el
+          .child(this.action("files-zoom", "放大", "放大预览：快速查看窗口，可拖大、全屏、缩放", t, () => quickLook(this.fullPath())))
+          .child(this.action("files-reveal", "访达", "在访达中显示", t, () => exec("open", ["-R", this.fullPath()]).catch(() => {})))
+          .child(this.action("files-open-external", "默认应用", "用默认应用打开", t, () => exec("open", [this.fullPath()]).catch(() => {})))))
+      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6)
+        .on_mouse_down("right", (_e, cx) => this.menu(this.root, true, cx)).children(this.rows("", 0, [], t))
         .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
       .when(Boolean(this.file) && Boolean(this.native), el => el.child(div().flex_1().min_h(0).relative()
