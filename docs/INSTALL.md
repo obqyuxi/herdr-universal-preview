@@ -1,6 +1,6 @@
 # 安装 DD-up（日用版）
 
-DD-up 是在官方 Herdr 0.1.12 上加了本项目补丁的个人构建，装在官方 Herdr 旁边，**不覆盖** `/Applications/Herdr.app`。名称、可执行文件名、bundle id 和布局名只在仓库根目录的 `brand.env` 里设置一次；图标源文件是 `assets/icon/logo.svg`，用 `scripts/make-icon` 生成 `AppIcon.icns`。
+DD-up 是在官方 Herdr（上游 v0.1.14）上加了本项目补丁的个人构建，装在官方 Herdr 旁边，**不覆盖** `/Applications/Herdr.app`。名称、可执行文件名、bundle id 和布局名只在仓库根目录的 `brand.env` 里设置一次；图标源文件是 `assets/icon/logo.svg`，用 `scripts/make-icon` 生成 `AppIcon.icns`。
 
 | 项 | 内容 |
 |---|---|

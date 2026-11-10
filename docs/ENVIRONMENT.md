@@ -27,7 +27,7 @@
 |---|---|
 | App | `/Applications/Herdr.app`，bundle id `dev.herdr.app`，版本 0.1.12（DMG 安装；README 说的 `~/Applications` 在本机不成立） |
 | `herdr-app` 命令 | `~/.local/bin/herdr-app`，符号链接指向 `/Applications/Herdr.app/Contents/MacOS/Herdr` |
-| `hc` 命令 | `~/.local/bin/hc`，符号链接指向 `herdr-core`（0.1.17，sha256 `b0ad77ab78ca8d9a…`） |
+| `hc` 命令 | `~/.local/bin/hc` 和 `~/.local/bin/herdr-core` 都是符号链接，指向 `~/.local/share/herdr-core/current/Contents/MacOS/herdr-core`（0.1.19，官方签名的 Herdr Core.app，2026-11-09 用官方安装脚本从 0.1.17 升级；0.1.17 时是 `~/.local/bin` 下的单个文件，sha256 `b0ad77ab78ca8d9a…`） |
 | App home | `~/.config/herdr-app`（布局 main/main-folders/terminals/win98；内置 mods 共 21 个，含 space-folders；本次没有发现用户自定义的 mod） |
 | core 设置 | `~/.config/herdr-core/` 不存在，使用默认设置 |
 | core 状态目录 | `~/.local/state/herdr-core/default/`（session `default`，socket `default.sock`） |

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Mon, 2 Nov 2026 22:04:01 -0800
-Subject: [PATCH 3/8] gpui: GPUIApplication implements CrAppControlProtocol for
+Subject: [PATCH 2/7] gpui: GPUIApplication implements CrAppControlProtocol for
  Chromium (CEF)
 
 CEF requires NSApp to answer isHandlingSendEvent / setHandlingSendEvent:,
@@ -9,7 +9,7 @@ with sendEvent: marking dispatch. Needed for the herdr-universal-preview
 Chromium browser panel; harmless otherwise.
 
 diff --git a/vendor/gpui-pre-macos/src/platform.rs b/vendor/gpui-pre-macos/src/platform.rs
-index d25e86e..ff0671a 100644
+index 05fb07b..37e0103 100644
 --- a/vendor/gpui-pre-macos/src/platform.rs
 +++ b/vendor/gpui-pre-macos/src/platform.rs
 @@ -78,12 +78,45 @@ const MAC_PLATFORM_IVAR: &str = "platform";

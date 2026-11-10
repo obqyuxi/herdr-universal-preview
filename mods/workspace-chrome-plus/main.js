@@ -37,16 +37,19 @@ export default class WorkspaceChrome extends View {
     const collapsed = narrow();
     if (props()?.footer) {
       const row = (id, icon, label, dim, action) => h_flex().id(id).h(28).px(8).gap(9).items_center().rounded(8)
+        .when(collapsed, el => el.relative().w(32).px(0).justify_center().tooltip(label))
         .text_color(dim ? t.dim : t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
         .on_click(action).child(svg(`mods/workspace-chrome/${icon}.svg`).size(14))
         .when(!collapsed, el => el.child(label));
+      const ready = div().size(6).rounded_full().bg(t.accent);
       const settings = row("settings", "settings", "Settings", false, () => run("app.settings"))
-        .when(Boolean(updates().app.ready), el => el.child(div().size(6).rounded_full().bg(t.accent)));
+        .when(Boolean(updates().app.ready), el => el.child(collapsed ? ready.absolute().top(5).right(6) : ready));
       const phone = div().id("phone").size(28).flex_none().flex().items_center().justify_center().rounded(8)
         .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
         .on_click(() => run("mod.open", { name: "phone-pair" }))
         .child(svg("mods/workspace-chrome-plus/phone.svg").size(14));
       return v_flex().size_full().bg(t.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(8).text_size(13)
+        .when(collapsed, el => el.px(0).items_center())
         // On the narrow rail the phone button gets its own row under Settings.
         .child(collapsed ? settings : h_flex().gap(2).items_center().child(settings.flex_1()).child(phone))
         .when(collapsed, el => el.child(phone.ml(0)))

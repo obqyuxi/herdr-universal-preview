@@ -1,6 +1,6 @@
 # DD-up
 
-**English summary.** DD-up is a personal build of [Herdr](https://github.com/herdrdev/herdr-app) (v0.1.12, macOS Apple Silicon) with one host addition: mods get a `nativeView` element that hosts a native macOS view inside the mod's own bounds (frame synced at paint time, hidden under overlays, focus handed back to the terminal). On top of it, three ordinary mods and one layout:
+**English summary.** DD-up is a personal build of [Herdr](https://github.com/herdrdev/herdr-app) (v0.1.14, macOS Apple Silicon) with one host addition: mods get a `nativeView` element that hosts a native macOS view inside the mod's own bounds (frame synced at paint time, hidden under overlays, focus handed back to the terminal). On top of it, three ordinary mods and one layout:
 
 - **files-plus**: the Files panel opens PDF (PDFKit), Word/Excel/PowerPoint/Pages/Numbers/Keynote and images (Quick Look), and audio/video (AVKit) right in the panel. Right-click a file for Show in Finder or Open with Default App (a folder: Open in Finder); a previewed file has the same choices under ⋯ in its header (`files-plus-menu` draws the menu). The panel speaks English or Chinese, following the macOS language.
 - **browser**: a side browser panel (Chromium via CEF 156; WebKit fallback) with persistent logins, find, zoom, print, downloads, history, clear data, and an opt-in import of your Chrome cookies.
@@ -45,7 +45,7 @@ DD-up 是在官方 Herdr 上加了一个小扩展的个人构建：在 Herdr 主
 
 ## 现状和限制
 
-- 只支持 **macOS、Apple Silicon**，跟随 Herdr **0.1.12**。官方升级后需要重新打补丁、编译，**不会自动更新**。
+- 只支持 **macOS、Apple Silicon**，跟随 Herdr **0.1.14**。官方升级后需要重新打补丁、编译，**不会自动更新**。
 - 应用没有 Apple 开发者签名，只有本机临时签名，所以目前只能**从源码编译安装**。
 - 浏览器内核是 Chromium（CEF 156），应用约 390 MB。不支持 Chrome 扩展程序，也不支持 `chrome://` 页面。
 - 远程机器上的文件暂时不能内嵌预览。
@@ -53,12 +53,12 @@ DD-up 是在官方 Herdr 上加了一个小扩展的个人构建：在 Herdr 主
 
 ## 从源码安装
 
-需要 macOS（Apple Silicon）、Command Line Tools（`xcode-select --install`）、[uv](https://docs.astral.sh/uv/)、git，以及已安装并打开过一次的官方 Herdr 0.1.12。工具链全部装在仓库内的 `.local/`，不修改全局环境。
+需要 macOS（Apple Silicon）、Command Line Tools（`xcode-select --install`）、[uv](https://docs.astral.sh/uv/)、git，以及已安装并打开过一次的官方 Herdr（0.1.12 或更新）和 herdr-core（0.1.19 或更新）。工具链全部装在仓库内的 `.local/`，不修改全局环境。
 
 ```sh
 git clone https://github.com/obqyuxi/herdr-universal-preview && cd herdr-universal-preview
 scripts/bootstrap-toolchain   # Rust 1.95.0、Zig 0.16.0、cmake/ninja、CEF 156（约 1–2 GB 下载）
-scripts/prepare-upstream      # 克隆 herdr-app v0.1.12，应用 patches/herdr-app
+scripts/prepare-upstream      # 克隆 herdr-app v0.1.14，应用 patches/herdr-app
 scripts/build --daily         # 编译并打包 artifacts/apps.noindex/DD-up.app
 scripts/install --dry-run     # 先看会新增什么
 scripts/install
@@ -99,7 +99,7 @@ scripts/uninstall --purge-data   # 同时删除 DD-up 自己的浏览器资料
 | 目录 | 内容 |
 |---|---|
 | `native/herdr-native-view` | 原生渲染器（objc2：WKWebView、PDFView、AVPlayerView、QLPreviewView，以及 CEF） |
-| `patches/herdr-app` | 宿主粘合补丁，在 v0.1.12 上用 `git am` 应用 |
+| `patches/herdr-app` | 宿主粘合补丁，在 v0.1.14 上用 `git am` 应用 |
 | `mods/`、`layouts/` | 上面说的 mod 和布局 |
 | `brand.env`、`assets/icon` | 名称和图标 |
 | `bridge/` | `ddup-bridge`：手机 App 和 Mac 之间的桥接服务（Rust） |

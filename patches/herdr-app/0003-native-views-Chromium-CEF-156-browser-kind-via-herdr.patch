@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Mon, 2 Nov 2026 22:22:26 -0800
-Subject: [PATCH 4/8] native views: Chromium (CEF 156) browser kind via
+Subject: [PATCH 3/7] native views: Chromium (CEF 156) browser kind via
  herdr-native-view
 
 Enables the chromium feature of herdr-native-view; regenerated
@@ -10,7 +10,7 @@ framework and helper apps are bundled by herdr-universal-preview's
 scripts/build.
 
 diff --git a/Cargo.lock b/Cargo.lock
-index fb525ed..2bcb299 100644
+index 5379280..c031144 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -335,7 +335,7 @@ version = "0.38.0+1.3.281"
@@ -276,7 +276,7 @@ index fb525ed..2bcb299 100644
   "bytes",
   "encoding_rs",
   "futures-channel",
-@@ -3699,7 +3856,7 @@ version = "0.1.12"
+@@ -3700,7 +3857,7 @@ version = "0.1.14"
  dependencies = [
   "anyhow",
   "async-channel",
@@ -285,7 +285,7 @@ index fb525ed..2bcb299 100644
   "fancy-regex 0.19.2",
   "ghostty-sys",
   "gpui-base",
-@@ -3736,6 +3893,7 @@ name = "herdr-native-view"
+@@ -3737,6 +3894,7 @@ name = "herdr-native-view"
  version = "0.0.1"
  dependencies = [
   "block2 0.6.2",
@@ -293,7 +293,7 @@ index fb525ed..2bcb299 100644
   "objc2 0.6.4",
   "objc2-app-kit 0.3.2",
   "objc2-av-foundation",
-@@ -4125,6 +4283,19 @@ dependencies = [
+@@ -4126,6 +4284,19 @@ dependencies = [
   "serde_core",
  ]
  
@@ -313,7 +313,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "inotify"
  version = "0.10.2"
-@@ -4343,7 +4514,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -4344,7 +4515,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "6aae1df220ece3c0ada96b8153459b67eebe9ae9212258bb0134ae60416fdf76"
  dependencies = [
   "libc",
@@ -322,7 +322,7 @@ index fb525ed..2bcb299 100644
   "pkg-config",
  ]
  
-@@ -4444,6 +4615,16 @@ dependencies = [
+@@ -4445,6 +4616,16 @@ dependencies = [
   "windows-link 0.2.1",
  ]
  
@@ -339,7 +339,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "libm"
  version = "0.2.16"
-@@ -6287,6 +6468,19 @@ version = "0.3.34"
+@@ -6288,6 +6469,19 @@ version = "0.3.34"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
  
@@ -359,7 +359,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "png"
  version = "0.17.16"
-@@ -6603,6 +6797,15 @@ dependencies = [
+@@ -6604,6 +6798,15 @@ dependencies = [
   "memchr",
  ]
  
@@ -375,7 +375,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "quickjs-jit"
  version = "0.12.11"
-@@ -7246,6 +7449,7 @@ version = "0.23.43"
+@@ -7247,6 +7450,7 @@ version = "0.23.43"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
  dependencies = [
@@ -383,7 +383,7 @@ index fb525ed..2bcb299 100644
   "once_cell",
   "ring",
   "rustls-pki-types",
-@@ -7833,6 +8037,17 @@ dependencies = [
+@@ -7834,6 +8038,17 @@ dependencies = [
   "windows-sys 0.61.2",
  ]
  
@@ -401,7 +401,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "spin"
  version = "0.9.9"
-@@ -8201,6 +8416,17 @@ dependencies = [
+@@ -8202,6 +8417,17 @@ dependencies = [
   "objc",
  ]
  
@@ -419,7 +419,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "target-lexicon"
  version = "0.13.5"
-@@ -8325,6 +8551,7 @@ dependencies = [
+@@ -8326,6 +8552,7 @@ dependencies = [
   "powerfmt",
   "serde_core",
   "time-core",
@@ -427,7 +427,7 @@ index fb525ed..2bcb299 100644
  ]
  
  [[package]]
-@@ -8333,6 +8560,16 @@ version = "0.1.9"
+@@ -8334,6 +8561,16 @@ version = "0.1.9"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
  
@@ -444,7 +444,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "tiny-keccak"
  version = "2.0.2"
-@@ -8778,6 +9015,12 @@ version = "0.2.6"
+@@ -8779,6 +9016,12 @@ version = "0.2.6"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
  
@@ -457,7 +457,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "universal-hash"
  version = "0.6.1"
-@@ -8800,6 +9043,39 @@ version = "0.9.0"
+@@ -8801,6 +9044,39 @@ version = "0.9.0"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
  
@@ -497,7 +497,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "url"
  version = "2.5.8"
-@@ -8818,7 +9094,7 @@ version = "0.46.0"
+@@ -8819,7 +9095,7 @@ version = "0.46.0"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "e419dff010bb12512b0ae9e3d2f318dfbdf0167fde7eb05465134d4e8756076f"
  dependencies = [
@@ -506,7 +506,7 @@ index fb525ed..2bcb299 100644
   "data-url",
   "flate2",
   "fontdb",
-@@ -8845,6 +9121,12 @@ version = "0.7.6"
+@@ -8846,6 +9122,12 @@ version = "0.7.6"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
  
@@ -519,7 +519,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "utf8_iter"
  version = "1.0.4"
-@@ -9179,7 +9461,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -9180,7 +9462,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "338e30461b3a2b67d70eb30a6d89f8e0c93a833e07d2ae89085cd070c4a00ac0"
  dependencies = [
   "proc-macro2",
@@ -528,7 +528,7 @@ index fb525ed..2bcb299 100644
   "quote",
  ]
  
-@@ -9362,7 +9644,7 @@ dependencies = [
+@@ -9363,7 +9645,7 @@ dependencies = [
   "js-sys",
   "khronos-egl",
   "libc",
@@ -537,7 +537,7 @@ index fb525ed..2bcb299 100644
   "log",
   "naga",
   "ndk-sys",
-@@ -10155,6 +10437,16 @@ dependencies = [
+@@ -10156,6 +10438,16 @@ dependencies = [
   "zeroize",
  ]
  
@@ -554,7 +554,7 @@ index fb525ed..2bcb299 100644
  [[package]]
  name = "xcb"
  version = "1.7.1"
-@@ -10163,7 +10455,7 @@ checksum = "a6c2ad15e0e922856ee89afe862b8992334bbe7953adad56cd1199358cb30566"
+@@ -10164,7 +10456,7 @@ checksum = "a6c2ad15e0e922856ee89afe862b8992334bbe7953adad56cd1199358cb30566"
  dependencies = [
   "bitflags 2.13.1",
   "libc",
@@ -564,7 +564,7 @@ index fb525ed..2bcb299 100644
  ]
  
 diff --git a/Cargo.toml b/Cargo.toml
-index 59be03d..28bd044 100644
+index eb42e9c..f9e096c 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -59,7 +59,7 @@ gpui_linux = { package = "gpui-pre-linux", version = "=0.3.8", features = ["rend
@@ -577,17 +577,17 @@ index 59be03d..28bd044 100644
  
  [target.'cfg(windows)'.dependencies]
 diff --git a/THIRD-PARTY-NOTICES b/THIRD-PARTY-NOTICES
-index 04ae0f1..f571596 100644
+index 1c3bda6..bbad6f9 100644
 --- a/THIRD-PARTY-NOTICES
 +++ b/THIRD-PARTY-NOTICES
 @@ -2,8 +2,8 @@ Herdr third-party notices
  =========================
  Regenerate with just notices. See licenses/README.md.
  
--Input-SHA256: 888795e83d62df7c834a42e394acb6c48a6409a14001c71469001f08737362ff Cargo.lock
--Input-SHA256: 391054b5e4025cb90a263719c21b47819d62cb3e2801a51b5f9196769c2f87a2 Cargo.toml
+-Input-SHA256: 6a3b4177337bfb82680d2992e24b5f948c0c4ce524bafa5b1c8cf8090f45adba Cargo.lock
+-Input-SHA256: 824d8d946ec207640fc5e7fcefefcbcbb2267c3e35786168fd15ec84ba87fb72 Cargo.toml
 +Input-SHA256: 97c7041a1c5b3e3c2cdf90ef5fc4129a7f7a6bfa3664506381e9e9eeae05169c Cargo.lock
-+Input-SHA256: c3b58310d18e7e271c5396eb7e444234bddbf85c6eb32f23d10f91466e6a74d2 Cargo.toml
++Input-SHA256: da512adf6e6a930b191d3207adba429f285c3d119e81186cd4bdcb1699af79be Cargo.toml
  Input-SHA256: c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4 LICENSE
  Input-SHA256: e58cb0de2dde300bcda769ca993fde2737f42c0274082f038621ab22975a49e2 about.toml
  Input-SHA256: 84a7a98c82140fb12c37fe42b93805baa16024cb3e5acc599b7ffe612c55d847 assets/fonts/LICENSE-SymbolsNerdFont.txt
@@ -607,7 +607,24 @@ index 04ae0f1..f571596 100644
    utf8_iter 1.0.4 — https://github.com/hsivonen/utf8_iter
    value-trait 0.12.2 — https://github.com/simd-lite/value-trait
    x11rb-protocol 0.13.2 — https://github.com/psychon/x11rb
-@@ -2965,6 +2967,7 @@ Apache License 2.0 (Apache-2.0)
+@@ -2752,7 +2754,7 @@ Apache License 2.0 (Apache-2.0)
+ 
+ ----------------------------------------------------------------------
+ Apache License 2.0 (Apache-2.0)
+-  herdr-app 0.1.13
++  herdr-app 0.1.14
+ 
+                                  Apache License
+                            Version 2.0, January 2004
+@@ -2958,13 +2960,14 @@ Apache License 2.0 (Apache-2.0)
+ 
+ ----------------------------------------------------------------------
+ Apache License 2.0 (Apache-2.0)
+-  herdr-app 0.1.13
++  herdr-app 0.1.14
+   codespan-reporting 0.13.1 — https://github.com/brendanzab/codespan
+   crypto-primes 0.7.2 — https://github.com/entropyxyz/crypto-primes
+   self_cell 1.3.0 — https://github.com/Voultapher/self_cell
    sys-locale 0.3.2 — https://github.com/1Password/sys-locale
    unarray 0.1.4 — https://github.com/cameron1024/unarray
    unicode-linebreak 0.1.5 — https://github.com/axelf4/unicode-linebreak
@@ -941,6 +958,36 @@ index 04ae0f1..f571596 100644
    wasm-streams 0.4.2 — https://github.com/MattiasBuelens/wasm-streams/
    wgpu-core-deps-apple 29.0.4 — https://github.com/gfx-rs/wgpu
    wgpu-core-deps-emscripten 29.0.4 — https://github.com/gfx-rs/wgpu
+@@ -12028,12 +12263,12 @@ limitations under the License.
+ 
+ ----------------------------------------------------------------------
+ Apache License 2.0 (Apache-2.0)
+-  herdr-app 0.1.13
+-  herdr-app 0.1.13
+-  herdr-app 0.1.13
+-  herdr-app 0.1.13
+-  herdr-app 0.1.13
+-  herdr-app 0.1.13
++  herdr-app 0.1.14
++  herdr-app 0.1.14
++  herdr-app 0.1.14
++  herdr-app 0.1.14
++  herdr-app 0.1.14
++  herdr-app 0.1.14
+   gpui-pre 0.3.8 — https://github.com/zed-industries/zed
+   gpui-pre-apple 0.3.8 — https://github.com/zed-industries/zed
+   gpui-pre-linux 0.3.8 — https://github.com/zed-industries/zed
+@@ -12283,8 +12518,8 @@ Apache License
+ 
+ ----------------------------------------------------------------------
+ Apache License 2.0 (Apache-2.0)
+-  herdr-app 0.1.13
+-  herdr-app 0.1.13
++  herdr-app 0.1.14
++  herdr-app 0.1.14
+   gpui-base 0.7.1 — https://github.com/longbridge/gpui-kit
+ 
+ Copyright 2024 - 2026 Longbridge <https://longbridge.com>
 @@ -14124,6 +14359,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  ----------------------------------------------------------------------
  ISC License (ISC)

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Thu, 5 Nov 2026 02:03:18 -0800
-Subject: [PATCH 7/8] terminal links: right-click a file or folder link for
+Subject: [PATCH 6/7] terminal links: right-click a file or folder link for
  Reveal in Finder
 
 The pane menu gets the local path under the pointer and offers
@@ -11,17 +11,17 @@ runs it for scripts.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
-index 3113930..e7e84ed 100644
+index 18c21aa..7ca9906 100644
 --- a/defaults/AGENTS.md
 +++ b/defaults/AGENTS.md
-@@ -577,7 +577,8 @@ The main ones:
+@@ -613,7 +613,8 @@ The main ones:
  - Native views (Herdr Preview Dev builds of herdr-universal-preview): `native.debug` (every native
    view's frame, visibility, focus, content state and recent events), `native.call {key, action, args?}`
    (one whitelisted action, key `<copy>:<id>`), `native.open-link {path}` (what Cmd-clicking a file or
 -  folder link in a terminal does: show it in the files-plus panel, else open it with the system).
 +  folder link in a terminal does: show it in the files-plus panel, else open it with the system),
 +  `native.reveal {path}` (show it selected in Finder; the pane menu offers it on a link).
- - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help`, `app.palette` (again: closes it), `app.settings {section?}`
+ - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help` (again: closes it), `app.palette` (again: closes it), `app.settings {section?}`
    (sections: `look`, `machines`, `alerts`, `updates`, `privacy`; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
    `app.check_updates` (only a successful check reports Up to date; a failed check clears the checked time and can be retried), `app.update_core` (a newer herdr-core of this generation, terminals kept;
 diff --git a/defaults/mods/menu/gpui-kit.d.ts b/defaults/mods/menu/gpui-kit.d.ts
@@ -22722,19 +22722,19 @@ index 0000000..f131959
 +  }
 +}
 diff --git a/defaults/mods/menu/main.js b/defaults/mods/menu/main.js
-index 8fe1954..b69a444 100644
+index d1fb80c..6a5c08a 100644
 --- a/defaults/mods/menu/main.js
 +++ b/defaults/mods/menu/main.js
-@@ -33,6 +33,8 @@ function items(p, git) {
-       // Once they go to the program, Shift+right-click still opens this menu.
-       const toProgram = term?.labels?.["herdr.right-click"] === "program";
+@@ -36,6 +36,8 @@ function items(p, git) {
+       // no pane to split, zoom or close: its pane is the block's id.
+       const inTab = panes().some((pane) => pane.pane === tg.pane);
        return [
 +        // A file or folder link under the pointer (Herdr Preview Dev builds).
 +        ...(tg.link ? [["Reveal in Finder", "native.reveal", { path: tg.link }]] : []),
-         ["Split right", "pane.split", { direction: "right", pane: tg.pane }],
-         ["Split down", "pane.split", { direction: "down", pane: tg.pane }],
-         ["Zoom", "pane.zoom", { pane: tg.pane }],
-@@ -73,7 +75,7 @@ function items(p, git) {
+         ...(inTab
+           ? [
+               ["Split right", "pane.split", { direction: "right", pane: tg.pane }],
+@@ -80,7 +82,7 @@ function items(p, git) {
  }
  
  function menuIcon(command) {
@@ -22743,7 +22743,7 @@ index 8fe1954..b69a444 100644
    return `mods/workspace-chrome/${name}.svg`;
  }
  
-@@ -131,7 +133,7 @@ export default class Menu extends View {
+@@ -138,7 +140,7 @@ export default class Menu extends View {
        .children(
          list.map((it, i) =>
            v_flex()
@@ -22753,57 +22753,55 @@ index 8fe1954..b69a444 100644
              .id(`mi-${i}`)
              .h(31)
 diff --git a/src/commands.rs b/src/commands.rs
-index b55a2e4..b2382d8 100644
+index 006841d..b7c4a3d 100644
 --- a/src/commands.rs
 +++ b/src/commands.rs
-@@ -85,6 +85,7 @@ pub const COMMANDS: &[Command] = &[
+@@ -87,6 +87,7 @@ pub const COMMANDS: &[Command] = &[
      cmd("native.debug", &[], "Every native view: frame, visibility, focus, content state and recent events."),
      cmd("native.call", &[req("key"), req("action"), opt("args")], "Run one whitelisted action on a native view (key: <copy>:<id>)."),
      cmd("native.open-link", &[req("path")], "Open a local file or folder as a Cmd-clicked terminal link does: in the files-plus panel, else with the system."),
 +    cmd("native.reveal", &[req("path")], "Show a local file or folder selected in Finder (the pane menu's Reveal in Finder on a link)."),
-     cmd("app.help", &[], "Show the keys."),
+     cmd("app.help", &[], "Toggle the keys dialog."),
      cmd("app.welcome", &[], "Show the welcome again."),
      cmd("app.whats_new", &[], "Show what this release brought (it opens once by itself after an update)."),
 diff --git a/src/links.rs b/src/links.rs
-index a66a7ee..343eed0 100644
+index 77f8d7a..ac69714 100644
 --- a/src/links.rs
 +++ b/src/links.rs
-@@ -144,6 +144,16 @@ fn percent_decode(s: &str) -> Option<String> {
+@@ -144,6 +144,28 @@ fn percent_decode(s: &str) -> Option<String> {
      String::from_utf8(out).ok()
  }
  
 +/// HUP: shows a file or folder selected in Finder (`open -R`); elsewhere opens
 +/// the folder that holds it.
 +pub fn reveal(path: &Path) {
-+    if cfg!(target_os = "macos") {
-+        spawn("open", &[std::ffi::OsStr::new("-R"), path.as_os_str()]);
-+    } else {
-+        open(&Target::File(path.parent().filter(|_| !path.is_dir()).unwrap_or(path).to_path_buf()));
++    #[cfg(target_os = "macos")]
++    {
++        let spawned = std::process::Command::new("open")
++            .arg("-R")
++            .arg(path)
++            .stdin(std::process::Stdio::null())
++            .stdout(std::process::Stdio::null())
++            .stderr(std::process::Stdio::null())
++            .spawn();
++        match spawned {
++            // Reaped off the UI thread so it never lingers as a zombie.
++            Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
++            Err(e) => tracing::warn!("cannot run open -R: {e}"),
++        }
 +    }
++    #[cfg(not(target_os = "macos"))]
++    open(&Target::File(path.parent().filter(|_| !path.is_dir()).unwrap_or(path).to_path_buf()));
 +}
 +
- /// Hands the target to the system (xdg-open, open on macOS, explorer on Windows).
+ /// Hands the target to the system's default handler.
  pub fn open(target: &Target) {
      let arg = match target {
-@@ -157,8 +167,12 @@ pub fn open(target: &Target) {
-     } else {
-         "xdg-open"
-     };
-+    spawn(opener, &[arg]);
-+}
-+
-+fn spawn(opener: &str, args: &[&std::ffi::OsStr]) {
-     let spawned = std::process::Command::new(opener)
--        .arg(arg)
-+        .args(args)
-         .stdin(std::process::Stdio::null())
-         .stdout(std::process::Stdio::null())
-         .stderr(std::process::Stdio::null())
 diff --git a/src/terminal.rs b/src/terminal.rs
-index a32b473..c5aaff2 100644
+index 3d55696..5993470 100644
 --- a/src/terminal.rs
 +++ b/src/terminal.rs
-@@ -39,8 +39,9 @@ pub enum TerminalEvent {
+@@ -49,8 +49,9 @@ pub enum TerminalEvent {
      TitleChanged,
      /// The program ended.
      Ended,
@@ -22815,7 +22813,7 @@ index a32b473..c5aaff2 100644
  }
  
  /// What the canvas closures need, shared outside the entity so prepaint can resize.
-@@ -1444,7 +1445,11 @@ impl Render for TerminalView {
+@@ -1992,7 +1993,11 @@ impl Render for TerminalView {
                  if this.right_click_to_program && this.takes_mouse(ev.modifiers) {
                      this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers);
                  } else {
@@ -22829,10 +22827,10 @@ index a32b473..c5aaff2 100644
              }))
              .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
 diff --git a/src/window.rs b/src/window.rs
-index 0cfa050..179ab9a 100644
+index 1c41ddc..fcc4805 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -1401,8 +1401,12 @@ impl AppWindow {
+@@ -1417,8 +1417,12 @@ impl AppWindow {
                  TerminalEvent::OpenFile(path) => this.open_in_files(path.clone(), window, cx),
                  TerminalEvent::TitleChanged => this.publish(cx),
                  TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
@@ -22847,7 +22845,7 @@ index 0cfa050..179ab9a 100644
                  }
              });
              let focus = view.read(cx).focus_handle().clone();
-@@ -3170,6 +3174,12 @@ impl AppWindow {
+@@ -3308,6 +3312,12 @@ impl AppWindow {
                  };
                  self.open_in_files(path, window, cx);
              }

@@ -1,16 +1,16 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Wed, 4 Nov 2026 02:39:44 -0800
-Subject: [PATCH 6/8] terminal links: open a collapsed side panel that holds
+Subject: [PATCH 5/7] terminal links: open a collapsed side panel that holds
  files-plus
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/window.rs b/src/window.rs
-index 5322250..0cfa050 100644
+index ecbb562..1c41ddc 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -3524,6 +3524,11 @@ impl AppWindow {
+@@ -3660,6 +3660,11 @@ impl AppWindow {
                  self.run("layout.select", json!({ "stack": stack, "child": child }), window, cx);
              }
          }

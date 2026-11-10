@@ -418,3 +418,24 @@
   - 经家里 Wi-Fi 直连时关掉 Wi-Fi：8 秒后经 Tailscale 重新连上；桥接服务在 60 秒空闲上限时丢掉了那条死掉的 Wi-Fi 连接（日志“nothing from the phone for 60 s”）。D35 里“网络变化回调触发的重连”这一项由此补测。
 - 已知：`tailscaled` 的出站流量（控制面、中继）会经过 代理 App 的分流规则；目前能用，延迟没有测。官方 App 仍是“已停止”；登录时打开它的 LaunchAgent `dev.ddup.tailscale-open` 没有删，要不要删由用户决定。
 
+
+## D37 跟进上游：herdr-app v0.1.14，herdr-core 0.1.19（用户要求，2026-11-09）
+
+- 上游：`upstream.lock.json` 改为 herdr-app `v0.1.14`（`2405bf3`）。ghostty 子模块、Rust 1.95.0、Zig 0.16.0 都没变。
+- 补丁从 8 个变成 7 个。原来的 0001（ghostty 跳过 xcframework）上游已经合入（#331），删掉了，其余顺延编号。冲突都是上游在同一处也改了代码：
+  - `commands.rs`、`defaults/AGENTS.md`：保留上游改过的那行，加上本项目的 `native.*`。
+  - `main.rs`：上游的 `macos_check::startup` 和开发版的 home 检查都保留。
+  - `mods.rs`：上游的 `COMMANDS.retain`，再加上 native 事件通道。
+  - `links.rs`：上游把 `open` 拆成按平台的 `open_system`；`reveal` 改为自己启动 `open -R`，不再改 `open`。
+  - 内置 menu mod：上游给 Split/Zoom 加了 `inTab` 判断，“Reveal in Finder”放在它前面。
+  - `THIRD-PARTY-NOTICES`：用 `bun scripts/notices.ts` 重新生成，并入 CEF 那个补丁。
+- `workspace-chrome-plus` 跟上上游 workspace-chrome 的改动：侧边栏收窄时底部按钮居中、有 tooltip，更新提示点改成角标。tabs 和布局上游没改；files 只改了 Windows 部分，不影响本项目。
+- herdr-core：先在测试环境换成 0.1.19，测试通过后，按用户要求用官方安装脚本（`releases.herdr.dev/core/install.sh`，校验过 sha256 和官方签名）升级正式 core。现在 `~/.local/bin/herdr-core` 和 `hc` 是符号链接，指向 `~/.local/share/herdr-core/current` 里的 Herdr Core.app。core 重启后 12 个终端都在，桥接服务自动重连。0.1.17 的备份在 `~/Library/Application Support/DD-up/backups/herdr-core-0.1.17.backup-20261109-234553`，回退用 `hc update --from <备份> --force`。
+- 官方 `/Applications/Herdr.app` 仍是 0.1.12，本项目不动它；它自带更新，要升级由用户在官方 App 里点。
+- 验证（本地，隔离环境，test core 0.1.19）：
+  - 上游 `cargo test`：372 项通过。
+  - 补丁能干净应用。
+  - 7 个 mod 的 `check` 都通过。
+  - 原生单元测试、桥接服务单元测试通过；bridge-e2e、harmony-logic 通过。
+  - 开发版自检：网页与 PDF 13/13，音视频与 Quick Look 7/7，Chromium 6/6，`native.open-link` 中文文件名 ok。
+- 注意：新版本第一次启动会弹出“What's New”。弹窗盖着的时候原生视图被隐藏，自检会失败（setVisible、Quick Look、播放），要先 `overlay.close {id: "frame-whatsnew"}`。这是预期行为，不是回归。

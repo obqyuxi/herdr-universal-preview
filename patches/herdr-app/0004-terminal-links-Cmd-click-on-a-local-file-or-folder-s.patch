@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: herdr-universal-preview <hup@localhost>
 Date: Wed, 4 Nov 2026 02:07:03 -0800
-Subject: [PATCH 5/8] terminal links: Cmd-click on a local file or folder shows
+Subject: [PATCH 4/7] terminal links: Cmd-click on a local file or folder shows
  it in the files-plus panel
 
 file: URLs (OSC 8 from agents) are decoded to paths; the stack holding
@@ -12,36 +12,36 @@ native.open-link runs the same path for scripts and self-checks.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
-index 7133cb1..3113930 100644
+index 83aacae..18c21aa 100644
 --- a/defaults/AGENTS.md
 +++ b/defaults/AGENTS.md
-@@ -576,7 +576,8 @@ The main ones:
+@@ -612,7 +612,8 @@ The main ones:
    `layout.clone {name, as?}` (duplicate, then switch; default `<name>-copy`).
  - Native views (Herdr Preview Dev builds of herdr-universal-preview): `native.debug` (every native
    view's frame, visibility, focus, content state and recent events), `native.call {key, action, args?}`
 -  (one whitelisted action, key `<copy>:<id>`).
 +  (one whitelisted action, key `<copy>:<id>`), `native.open-link {path}` (what Cmd-clicking a file or
 +  folder link in a terminal does: show it in the files-plus panel, else open it with the system).
- - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help`, `app.palette` (again: closes it), `app.settings {section?}`
+ - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help` (again: closes it), `app.palette` (again: closes it), `app.settings {section?}`
    (sections: `look`, `machines`, `alerts`, `updates`, `privacy`; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
    `app.check_updates` (only a successful check reports Up to date; a failed check clears the checked time and can be retried), `app.update_core` (a newer herdr-core of this generation, terminals kept;
 diff --git a/src/commands.rs b/src/commands.rs
-index 1726873..b55a2e4 100644
+index 16ea179..006841d 100644
 --- a/src/commands.rs
 +++ b/src/commands.rs
-@@ -84,6 +84,7 @@ pub const COMMANDS: &[Command] = &[
+@@ -86,6 +86,7 @@ pub const COMMANDS: &[Command] = &[
      // HUP: native content views (Herdr Preview Dev).
      cmd("native.debug", &[], "Every native view: frame, visibility, focus, content state and recent events."),
      cmd("native.call", &[req("key"), req("action"), opt("args")], "Run one whitelisted action on a native view (key: <copy>:<id>)."),
 +    cmd("native.open-link", &[req("path")], "Open a local file or folder as a Cmd-clicked terminal link does: in the files-plus panel, else with the system."),
-     cmd("app.help", &[], "Show the keys."),
+     cmd("app.help", &[], "Toggle the keys dialog."),
      cmd("app.welcome", &[], "Show the welcome again."),
      cmd("app.whats_new", &[], "Show what this release brought (it opens once by itself after an update)."),
 diff --git a/src/layout.rs b/src/layout.rs
-index 557cbc7..7843bfc 100644
+index 6206ce8..5c003c6 100644
 --- a/src/layout.rs
 +++ b/src/layout.rs
-@@ -614,6 +614,11 @@ impl Node {
+@@ -619,6 +619,11 @@ impl Node {
          false
      }
  
@@ -54,7 +54,7 @@ index 557cbc7..7843bfc 100644
      pub fn active_child(&self) -> Option<&Node> {
          match &self.kind {
 diff --git a/src/links.rs b/src/links.rs
-index 9307857..a66a7ee 100644
+index e388141..77f8d7a 100644
 --- a/src/links.rs
 +++ b/src/links.rs
 @@ -111,6 +111,39 @@ pub fn resolve(link: &str, cwd: Option<&Path>) -> Option<Target> {
@@ -94,10 +94,10 @@ index 9307857..a66a7ee 100644
 +    String::from_utf8(out).ok()
 +}
 +
- /// Hands the target to the system (xdg-open, open on macOS, explorer on Windows).
+ /// Hands the target to the system's default handler.
  pub fn open(target: &Target) {
      let arg = match target {
-@@ -141,6 +174,21 @@ pub fn open(target: &Target) {
+@@ -170,6 +203,21 @@ fn open_system(arg: &std::ffi::OsStr) {
  mod tests {
      use super::*;
  
@@ -120,10 +120,10 @@ index 9307857..a66a7ee 100644
          PATTERN.find(text).unwrap().map(|m| m.as_str())
      }
 diff --git a/src/terminal.rs b/src/terminal.rs
-index dc1721c..a32b473 100644
+index 4d67c89..3d55696 100644
 --- a/src/terminal.rs
 +++ b/src/terminal.rs
-@@ -34,6 +34,8 @@ enum LinkTarget {
+@@ -44,6 +44,8 @@ enum LinkTarget {
  
  pub enum TerminalEvent {
      Peek(String),
@@ -132,7 +132,7 @@ index dc1721c..a32b473 100644
      TitleChanged,
      /// The program ended.
      Ended,
-@@ -1422,7 +1424,10 @@ impl Render for TerminalView {
+@@ -1949,7 +1951,10 @@ impl Render for TerminalView {
                      && let Some((target, _)) = this.link_at(ev.position)
                  {
                      match target {
@@ -145,10 +145,10 @@ index dc1721c..a32b473 100644
                      }
                      return;
 diff --git a/src/window.rs b/src/window.rs
-index a1b7dd6..5322250 100644
+index 27b3c42..ecbb562 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -1398,6 +1398,7 @@ impl AppWindow {
+@@ -1414,6 +1414,7 @@ impl AppWindow {
              let (block, addr) = (id.clone(), address.clone());
              let sub = cx.subscribe_in(&view, window, move |this, _, ev: &TerminalEvent, window, cx| match ev {
                  TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
@@ -156,7 +156,7 @@ index a1b7dd6..5322250 100644
                  TerminalEvent::TitleChanged => this.publish(cx),
                  TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
                  TerminalEvent::ContextMenu(at) => {
-@@ -3163,6 +3164,12 @@ impl AppWindow {
+@@ -3301,6 +3302,12 @@ impl AppWindow {
              }
              // HUP: native view inspection and actions for the test harness.
              "native.debug" => self.answer(Ok(crate::native_view::debug())),
@@ -169,7 +169,7 @@ index a1b7dd6..5322250 100644
              "native.call" => {
                  let (Some(key), Some(action)) = (Self::arg(a, "key"), Self::arg(a, "action")) else { return self.fail("native.call needs key and action") };
                  let r = crate::native_view::call_key(&key, &action, a.get("args").unwrap_or(&Value::Null));
-@@ -3500,6 +3507,38 @@ impl AppWindow {
+@@ -3636,6 +3643,38 @@ impl AppWindow {
          cx.notify();
      }
  
